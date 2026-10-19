@@ -36,7 +36,8 @@
   </section>
 
   <!-- Room -->
-  <section id="roomView" class="stack" hidden>
+  <section id="roomView" class="room" hidden>
+    <div class="main stack">
     <div class="card">
       <div class="row between">
         <span class="label">Room code</span>
@@ -83,7 +84,11 @@
       <p class="note" id="qEmpty">Nothing queued. When a song ends with nothing queued, Samewave adds similar songs automatically.</p>
     </div>
 
-    <div class="card">
+    <button class="ghost" id="leaveBtn">Leave room</button>
+    </div>
+
+    <aside class="side">
+    <div class="card chat-card">
       <span class="label">Chat</span>
       <div class="chat" id="chat" aria-live="polite"></div>
       <form class="row" id="chatForm">
@@ -91,8 +96,7 @@
         <button type="submit">Send</button>
       </form>
     </div>
-
-    <button class="ghost" id="leaveBtn">Leave room</button>
+    </aside>
   </section>
 </div>
 

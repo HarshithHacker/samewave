@@ -518,6 +518,7 @@ function readName() {
 }
 function enterRoom() {
   inRoom = true; clearTimeout(joinTimer);
+  document.body.classList.add('in-room');
   $('start').hidden = true; $('roomView').hidden = false; $('startErr').hidden = true;
   $('codeOut').textContent = code;
   history.replaceState(null, '', '#' + code);

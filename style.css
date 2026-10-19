@@ -46,4 +46,14 @@ input.code{font:500 22px var(--mono);letter-spacing:.2em;flex:0 0 7.5em;text-tra
 .msg b{color:var(--accent);font-weight:600}
 .msg.sys{font-size:13px;color:var(--muted);font-style:italic;text-align:center}
 .probe{position:absolute;left:-10000px;top:0;width:200px;height:200px;overflow:hidden}
+.room{display:grid;gap:14px;align-items:start}
+.main{min-width:0}
+/* Wide screens: chat sits on the right and stays in view while you scroll */
+@media (min-width:980px){
+  body.in-room .wrap{max-width:1200px}
+  .room{grid-template-columns:minmax(0,1fr) 360px;gap:20px}
+  .side{position:sticky;top:16px}
+  .chat-card{height:calc(100vh - 32px);max-height:820px}
+  .chat-card .chat{flex:1;height:auto;min-height:0}
+}
 [hidden]{display:none!important}
