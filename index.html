@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Samewave</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Instrument+Sans:wght@400;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Samewave</h1>
+    <p class="lede">Watch the same YouTube video on everyone's phone, in sync. Headphones on, together.</p>
+  </header>
+
+  <section id="start" style="display:grid;gap:14px">
+    <div class="card">
+      <span class="label">Host a room</span>
+      <p class="note">You pick the video and control play and pause for everyone.</p>
+      <button id="hostBtn">Start a room</button>
+    </div>
+    <div class="card">
+      <span class="label">Join a room</span>
+      <div class="row">
+        <input id="codeIn" class="code" maxlength="6" placeholder="code" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="joinBtn">Join</button>
+      </div>
+    </div>
+    <p class="err" id="startErr" hidden></p>
+  </section>
+
+  <section id="roomView" style="display:grid;gap:14px" hidden>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span class="label" id="roleLabel">Your room code</span>
+        <span class="status"><span class="dot"></span><span id="countTxt">Connecting…</span></span>
+      </div>
+      <div class="code-out" id="codeOut">----</div>
+      <p class="note" id="shareNote">Friends open this page and type the code.</p>
+    </div>
+
+    <div class="card" id="hostPanel" hidden>
+      <span class="label">YouTube link</span>
+      <div class="row">
+        <input id="urlIn" placeholder="Paste a video or playlist link" autocomplete="off">
+        <button id="loadBtn">Load</button>
+      </div>
+      <p class="note">A single video or a whole playlist. Playlists must be public or unlisted.</p>
+      <div class="row" id="skipRow" hidden>
+        <button class="ghost" id="prevBtn">Previous</button>
+        <button class="ghost" id="nextBtn">Next song</button>
+      </div>
+      <p class="err" id="urlErr" hidden></p>
+    </div>
+
+    <div class="card">
+      <div class="vid"><div id="player"></div></div>
+      <p class="note" id="info">Waiting for the host to pick a video.</p>
+      <button id="tapBtn" hidden>Tap to start listening</button>
+      <div class="meter" id="meter" hidden>Sync: <b id="off">--</b> from host</div>
+    </div>
+
+    <button class="ghost" id="leaveBtn">Leave room</button>
+  </section>
+</div>
+
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="app.js"></script>
+</body>
+</html>
