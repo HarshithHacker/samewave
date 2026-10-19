@@ -17,8 +17,8 @@ const BROKERS = [
   'wss://test.mosquitto.org:8081'
 ];
 const NS = 'samewave-hy/v3/';
-const HOST_TIMEOUT = 7000;          // silence before someone else takes over
-const MEMBER_TIMEOUT = 12000;       // silence before someone counts as gone
+const HOST_TIMEOUT = 12000;         // silence before someone else takes over
+const MEMBER_TIMEOUT = 60000;       // silence before someone counts as gone (backgrounded phones check in rarely)
 const QUEUE_MAX = 100;
 
 const rid = n => { let s = ''; while (s.length < n) s += Math.random().toString(36).slice(2); return s.slice(0, n); };
@@ -29,7 +29,10 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 };
-const me = rid(8);
+const me = (() => {
+  try { let id = sessionStorage.getItem('sw_id'); if (!id) { id = rid(8); sessionStorage.setItem('sw_id', id); } return id; }
+  catch (e) { return rid(8); }
+})();
 
 let myName = '', code = null, role = null, joinedAt = 0, inRoom = false;
 let clients = [];
@@ -38,6 +41,7 @@ let room = null;                    // shared room state, owned by the timekeepe
 let clockOff = 0, bestRtt = Infinity, lastStateSeen = 0;
 let chat = [];
 const seenMsg = new Set(), seenCtl = new Set();
+const knownIds = new Set();          // everyone who has been in this room
 // timekeeper only
 let members = {}, played = [], radioFor = null, chatlogTimer = null;
 let probeJobs = [], probeBusy = null, titleBusy = false;
@@ -116,6 +120,7 @@ function onState(raw) {
   }
   if (room && room.hostId !== d.hostId) bestRtt = Infinity;
   room = d; lastStateSeen = Date.now();
+  room.members.forEach(m => knownIds.add(m.id));
   if (!inRoom) enterRoom();
   renderAll(); applyVideo(); sync();
 }
@@ -157,12 +162,16 @@ function onPing(d) {
   const isNew = !members[id];
   members[id] = { id, n: clean(d.n, 24) || 'Someone', j: +d.j || now, seen: now };
   pub('pong/' + id, { c: d.c, h: now });
-  if (isNew) { sys(members[id].n + ' joined'); pushState(); }
+  if (isNew) {
+    if (!knownIds.has(id)) sys(members[id].n + ' joined');
+    knownIds.add(id);
+    pushState();
+  }
 }
 function expireMembers() {
   const now = Date.now(); let changed = false;
   for (const id in members) {
-    if (now - members[id].seen > MEMBER_TIMEOUT) { sys(members[id].n + ' left'); delete members[id]; changed = true; }
+    if (now - members[id].seen > MEMBER_TIMEOUT) { sys(members[id].n + ' left'); knownIds.delete(id); delete members[id]; changed = true; }
   }
   if (changed) pushState();
 }
@@ -321,7 +330,7 @@ function takeOver() {
   const old = room, now = Date.now(), pos = expectedPos();
   role = 'host';
   members = {};
-  (old.members || []).forEach(m => { if (m.id !== old.hostId && m.id !== me) members[m.id] = { id: m.id, n: m.n, j: m.j, seen: now }; });
+  (old.members || []).forEach(m => { if (m.id !== me) { members[m.id] = { id: m.id, n: m.n, j: m.j, seen: now }; knownIds.add(m.id); } });
   room = { ...old, epoch: old.epoch + 1, hostId: me, left: false, at: now, pos };
   played = []; radioFor = null; bestRtt = Infinity; clockOff = 0;
   if (ytReady && room.videoId && loadedId !== room.videoId) { loadedId = room.videoId; yt.loadVideoById({ videoId: room.videoId, startSeconds: pos }); }
@@ -631,6 +640,11 @@ $('tapBtn').onclick = () => {
 };
 $('leaveBtn').onclick = () => { leave(); setTimeout(() => { closeAll(); location.hash = ''; location.reload(); }, 400); };
 window.addEventListener('pagehide', leave);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (role === 'host') pushState();
+  if (role === 'listener') { ping(); sync(); }
+});
 
 /* ---------------- timers ---------------- */
 setInterval(() => {
