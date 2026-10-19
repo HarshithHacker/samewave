@@ -196,6 +196,15 @@ function handleCtl(d) {
     case 'prev': goPrev(); break;
     case 'add': addLink(d.link, who); break;
     case 'remove': room.queue = room.queue.filter(q => q.qid !== d.qid); pushState(); break;
+    case 'playnow': {
+      const i = room.queue.findIndex(q => q.qid === d.qid);
+      if (i < 0) break;
+      const [it] = room.queue.splice(i, 1);
+      if (room.videoId) { played.push({ v: room.videoId, title: room.title, by: room.by }); played = played.slice(-30); }
+      sys(who + ' played ' + (it.title || 'a song'));
+      playItem(it);
+      break;
+    }
     case 'up': {
       const i = room.queue.findIndex(q => q.qid === d.qid);
       if (i > 0) { const [it] = room.queue.splice(i, 1); room.queue.splice(i - 1, 0, it); pushState(); }
@@ -471,7 +480,8 @@ function renderQueue() {
   const q = (room && room.queue) || [];
   q.forEach((item, i) => {
     const li = document.createElement('li');
-    const text = document.createElement('div'); text.className = 'q-text';
+    const text = document.createElement('button'); text.className = 'q-text'; text.dataset.act = 'playnow'; text.dataset.qid = item.qid;
+    text.title = 'Play now'; text.setAttribute('aria-label', 'Play ' + (item.title || 'this song') + ' now');
     const t = document.createElement('div'); t.className = 'q-title'; t.textContent = item.title || 'YouTube video';
     const by = document.createElement('div'); by.className = 'q-by'; by.textContent = item.radio ? 'Radio' : 'Added by ' + (item.by || 'someone');
     text.append(t, by);

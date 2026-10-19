@@ -37,7 +37,9 @@ input.code{font:500 22px var(--mono);letter-spacing:.2em;flex:0 0 7.5em;text-tra
 .meter b{color:var(--ok);font-weight:500}.meter b.far{color:var(--live)}
 .queue{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto}
 .queue li{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:12px;background:var(--sunk)}
-.queue .q-text{flex:1;min-width:0}
+.queue button.q-text{flex:1;min-width:0;display:block;text-align:left;background:transparent;border:0;padding:4px 6px;margin:-4px -6px;min-height:0;border-radius:8px;color:var(--ink);font:inherit;cursor:pointer}
+.queue button.q-text:hover{background:var(--line)}
+.queue button.q-text:hover .q-title::before{content:'\25B6\00A0';color:var(--accent)}
 .queue .q-title{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .queue .q-by{font-size:13px;color:var(--muted)}
 .queue button{min-height:36px;padding:6px 10px;font-size:14px;background:transparent;color:var(--ink);border:1px solid var(--line)}
