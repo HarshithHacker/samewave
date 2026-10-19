@@ -11,59 +11,92 @@
 <div class="wrap">
   <header>
     <h1>Samewave</h1>
-    <p class="lede">Watch the same YouTube video on everyone's phone, in sync. Headphones on, together.</p>
+    <p class="lede">Listen to the same YouTube songs on everyone's phone, in sync. Headphones on, together.</p>
   </header>
 
-  <section id="start" style="display:grid;gap:14px">
+  <!-- Start screen -->
+  <section id="start" class="stack">
     <div class="card">
-      <span class="label">Host a room</span>
-      <p class="note">You pick the video and control play and pause for everyone.</p>
+      <label class="label" for="nameIn">Your name</label>
+      <input id="nameIn" maxlength="24" placeholder="What should friends call you?" autocomplete="nickname">
+    </div>
+    <div class="card">
+      <span class="label">Start a room</span>
+      <p class="note">You get a code to share. Everyone in the room can add songs and control playback.</p>
       <button id="hostBtn">Start a room</button>
     </div>
     <div class="card">
       <span class="label">Join a room</span>
       <div class="row">
-        <input id="codeIn" class="code" maxlength="6" placeholder="code" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <input id="codeIn" class="code" maxlength="6" placeholder="code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Room code">
         <button id="joinBtn">Join</button>
       </div>
     </div>
     <p class="err" id="startErr" hidden></p>
   </section>
 
-  <section id="roomView" style="display:grid;gap:14px" hidden>
+  <!-- Room -->
+  <section id="roomView" class="stack" hidden>
     <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <span class="label" id="roleLabel">Your room code</span>
-        <span class="status"><span class="dot"></span><span id="countTxt">Connecting…</span></span>
+      <div class="row between">
+        <span class="label">Room code</span>
+        <span class="status"><span class="dot" id="dot"></span><span id="statusTxt">Connecting…</span></span>
       </div>
       <div class="code-out" id="codeOut">----</div>
-      <p class="note" id="shareNote">Friends open this page and type the code.</p>
-    </div>
-
-    <div class="card" id="hostPanel" hidden>
-      <span class="label">YouTube link</span>
-      <div class="row">
-        <input id="urlIn" placeholder="Paste a video or playlist link" autocomplete="off">
-        <button id="loadBtn">Load</button>
-      </div>
-      <p class="note">A single video or a whole playlist. Playlists must be public or unlisted.</p>
-      <div class="row" id="skipRow" hidden>
-        <button class="ghost" id="prevBtn">Previous</button>
-        <button class="ghost" id="nextBtn">Next song</button>
-      </div>
-      <p class="err" id="urlErr" hidden></p>
+      <div class="people" id="people" aria-label="People in the room"></div>
     </div>
 
     <div class="card">
       <div class="vid"><div id="player"></div></div>
-      <p class="note" id="info">Waiting for the host to pick a video.</p>
-      <button id="tapBtn" hidden>Tap to start listening</button>
-      <div class="meter" id="meter" hidden>Sync: <b id="off">--</b> from host</div>
+      <button id="tapBtn" class="big" hidden>Tap to start listening</button>
+      <div class="now">
+        <div class="now-title" id="nowTitle">Nothing playing</div>
+        <div class="note" id="nowBy">Add a song below to start</div>
+      </div>
+      <div class="progress">
+        <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Song position">
+        <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+      </div>
+      <div class="controls">
+        <button class="ghost" id="prevBtn" aria-label="Previous">Previous</button>
+        <button id="playBtn">Play</button>
+        <button class="ghost" id="nextBtn" aria-label="Skip">Skip</button>
+      </div>
+      <div class="meter" id="meter" hidden>Sync: <b id="off">--</b></div>
+    </div>
+
+    <div class="card">
+      <label class="label" for="urlIn">Add to queue</label>
+      <div class="row">
+        <input id="urlIn" placeholder="Paste a song, video or playlist link" autocomplete="off">
+        <button id="addBtn">Add</button>
+      </div>
+      <p class="note" id="addNote">Anyone in the room can add. Playlists must be public or unlisted.</p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <span class="label">Up next</span>
+        <span class="note" id="qCount"></span>
+      </div>
+      <ol class="queue" id="queue"></ol>
+      <p class="note" id="qEmpty">Nothing queued. When a song ends with nothing queued, Samewave adds similar songs automatically.</p>
+    </div>
+
+    <div class="card">
+      <span class="label">Chat</span>
+      <div class="chat" id="chat" aria-live="polite"></div>
+      <form class="row" id="chatForm">
+        <input id="chatIn" maxlength="300" placeholder="Say something" autocomplete="off" aria-label="Chat message">
+        <button type="submit">Send</button>
+      </form>
     </div>
 
     <button class="ghost" id="leaveBtn">Leave room</button>
   </section>
 </div>
+
+<div class="probe" aria-hidden="true"><div id="probe"></div></div>
 
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
