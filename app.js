@@ -400,7 +400,10 @@ function sys(text) {
 }
 
 /* ---------------- YouTube players ---------------- */
-window.onYouTubeIframeAPIReady = () => {
+let ytInit = false;
+function initPlayers() {
+  if (ytInit || !(window.YT && YT.Player)) return;
+  ytInit = true;
   yt = new YT.Player('player', {
     playerVars: { playsinline: 1, rel: 0 },
     events: {
@@ -422,7 +425,10 @@ window.onYouTubeIframeAPIReady = () => {
       onError: () => { if (probeBusy) probeDone(probeBusy, []); }
     }
   });
-};
+}
+/* YouTube's code can finish loading before or after ours, so handle both orders. */
+window.onYouTubeIframeAPIReady = initPlayers;
+if (window.YT && YT.Player) initPlayers();
 
 /* ---------------- rendering ---------------- */
 function renderAll() { renderStatus(); renderPeople(); renderNow(); renderQueue(); renderTap(); }
