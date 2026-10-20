@@ -433,16 +433,17 @@ function onChat(d) {
   const id = clean(d.id, 16);
   if (!id || seenMsg.has(id)) return;
   seenMsg.add(id);
-  const m = { id, at: +d.at || Date.now(), sys: !!d.sys, bot: clean(d.bot, 16), from: clean(d.from, 20), n: clean(d.n, 24) || 'Someone', text: clean(d.text, 300) };
+  const m = { id, at: +d.at || Date.now(), sys: !!d.sys, bot: clean(d.bot, 16), from: clean(d.from, 20), n: clean(d.n, 24) || 'Someone', text: clean(d.text, 300), ann: !!d.ann };
   if (!m.text) return;
+  m.dj = !!d.dj || m.bot === 'DJ' || (!m.sys && !m.bot && /^@dj\b/i.test(m.text));
   chat.push(m);
   chat.sort((a, b) => a.at - b.at);
   if (chat.length > 100) chat = chat.slice(-100);
-  renderChat();
+  renderChat(); renderDj();
   if (role === 'host') {
     scheduleChatlog();
     if (!m.sys && !m.bot && Date.now() - m.at < 60000) {
-      if (/^@dj\b/i.test(m.text)) djRequest(m);
+      if (m.dj) djRequest(m);
       else if (/^@game\b/i.test(m.text)) handleCtl({ id: 'g' + m.id, n: m.n, from: m.from, t: 'game' });
     }
   }
@@ -451,17 +452,17 @@ function scheduleChatlog() {                     // so people who join later see
   if (chatlogTimer) return;
   chatlogTimer = setTimeout(() => {
     chatlogTimer = null;
-    if (role === 'host') pub('chatlog', chat.slice(-40).map(m => ({ id: m.id, at: m.at, sys: m.sys, bot: m.bot, n: m.n, text: m.text })), true);
+    if (role === 'host') pub('chatlog', chat.slice(-40).map(m => ({ id: m.id, at: m.at, sys: m.sys, bot: m.bot, n: m.n, text: m.text, dj: m.dj, ann: m.ann })), true);
   }, 1000);
 }
-function sendChat(text) {
-  const msg = { id: rid(12), from: me, n: myName, text: clean(text, 300), at: Date.now() + (role === 'listener' ? clockOff : 0) };
+function sendChat(text, dj) {
+  const msg = { id: rid(12), from: me, n: myName, dj: !!dj, text: clean(text, 300), at: Date.now() + (role === 'listener' ? clockOff : 0) };
   if (!msg.text) return;
   pub('chat', msg); onChat(msg);
 }
-function sys(text) {
+function sys(text, dj) {
   if (role !== 'host') return;
-  const msg = { id: rid(12), sys: true, text, at: Date.now() };
+  const msg = { id: rid(12), sys: true, dj: !!dj, text, at: Date.now() };
   pub('chat', msg); onChat(msg);
 }
 
@@ -487,9 +488,9 @@ function releaseLockIfDone() {
   room.lock = null;
   room.queue.forEach(q => { delete q.winnerPick; });
 }
-function bot(text, name) {                       // a message from one of the AI crews
+function bot(text, name, ann) {                  // a message from one of the AI crews
   if (role !== 'host') return;
-  const msg = { id: rid(12), bot: name, n: name, text: clean(text, 300), at: Date.now() };
+  const msg = { id: rid(12), bot: name, n: name, ann: !!ann, text: clean(text, 300), at: Date.now() };
   pub('chat', msg); onChat(msg);
 }
 
@@ -498,10 +499,10 @@ let djBusy = false;
 async function djRequest(m) {
   if (room.lock && m.from !== room.lock.id) { lockedNotice(); return; }
   const request = m.text.replace(/^@dj\b[:,]?\s*/i, '').trim();
-  if (!request) { bot('Tell me what you want to hear, like "@dj chill 90s Bollywood".', 'DJ'); return; }
+  if (!request) { bot('Tell me what you want to hear, like "chill 90s Bollywood".', 'DJ'); return; }
   if (djBusy) { bot('Still working on the last request. One at a time!', 'DJ'); return; }
   djBusy = true;
-  sys('🎧 The DJ crew is on it: reading the vibe and digging for songs…');
+  sys('🎧 On it: reading the vibe and digging for songs…', true);
   try {
     const res = await fetch('/api/dj', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -517,8 +518,8 @@ async function djRequest(m) {
     const items = (Array.isArray(out.songs) ? out.songs : []).filter(x => x && okV(x.v)).slice(0, 8)
       .map(x => ({ qid: rid(8), v: x.v, title: clean(x.title, 120), by: 'DJ' }));
     if (!items.length) { bot('No playable songs came back. Try different words.', 'DJ'); return; }
-    if (out.brief && out.brief.summary) sys('Vibe: ' + clean(out.brief.summary, 140));
-    bot(out.intro || ('Coming up: ' + items[0].title), 'DJ');
+    if (out.brief && out.brief.summary) sys('Vibe: ' + clean(out.brief.summary, 140), true);
+    bot('🎧 ' + (out.intro || ('Coming up: ' + items[0].title)), 'DJ', true);   // also shown in the main chat
     insertFront(items, !!(room.lock && m.from === room.lock.id));
     room.queue = room.queue.slice(0, QUEUE_MAX);
     if (!room.videoId) advance(); else pushState();
@@ -555,7 +556,7 @@ async function startGame(who) {
       bot(out.message || 'I couldn\'t put a quiz together right now. Try again in a minute.', 'Quizmaster');
       return;
     }
-    gameQs = qs.slice(0, 5);
+    gameQs = qs.slice(0, 3);
     room.game.total = gameQs.length;
     room.game.scores = memberList().map(x => ({ id: x.id, n: x.n, pts: 0 }));
     bot(out.intro || 'Quiz time! Fastest right answers score the most.', 'Quizmaster');
@@ -629,7 +630,8 @@ function renderLock() {
   const l = room && room.lock, bar = $('lockBar');
   bar.hidden = !l;
   const out = lockedOut();
-  ['prevBtn', 'playBtn', 'nextBtn', 'addBtn'].forEach(id => { $(id).disabled = out; });
+  ['prevBtn', 'playBtn', 'nextBtn', 'addBtn', 'djOpen'].forEach(id => { $(id).disabled = out; });
+  if (out && !$('djForm').hidden) $('djOpen').click();
   if (!l) return;
   const mine = l.id === me;
   const progress = l.played === 0 ? 'starts with the next song' : 'song ' + Math.min(l.played, l.max) + ' of ' + l.max;
@@ -774,13 +776,37 @@ function renderChat() {
   const el = $('chat');
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   el.textContent = '';
-  chat.forEach(m => {
+  chat.filter(m => !m.dj || m.ann).forEach(m => {
     const div = document.createElement('div');
     if (m.sys) { div.className = 'msg sys'; div.textContent = m.text; }
     else {
       div.className = 'msg' + (m.bot ? ' bot' : '');
       const b = document.createElement('b'); b.textContent = m.n + ': ';
       div.append(b, document.createTextNode(m.text));
+    }
+    el.append(div);
+  });
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+function renderDj() {
+  const el = $('djLog');
+  const list = chat.filter(m => m.dj).slice(-30);
+  $('djEmpty').hidden = list.length > 0;
+  el.hidden = !list.length;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  el.textContent = '';
+  list.forEach(m => {
+    const div = document.createElement('div');
+    if (m.sys) { div.className = 'msg sys'; div.textContent = m.text; }
+    else if (m.bot) {
+      div.className = 'msg bot';
+      const b = document.createElement('b'); b.textContent = 'DJ: ';
+      div.append(b, document.createTextNode(m.text.replace(/^🎧\s*/, '')));
+    } else {
+      div.className = 'msg req';
+      const b = document.createElement('b'); b.textContent = m.n + ' asked: ';
+      div.append(b, document.createTextNode(m.text.replace(/^@dj\b[:,]?\s*/i, '')));
     }
     el.append(div);
   });
@@ -806,7 +832,7 @@ function enterRoom() {
   $('start').hidden = true; $('roomView').hidden = false; $('startErr').hidden = true;
   $('codeOut').textContent = code;
   history.replaceState(null, '', '#' + code);
-  renderAll(); renderChat();
+  renderAll(); renderChat(); renderDj();
 }
 function startHost() {
   role = 'host'; code = rand(); joinedAt = Date.now();
@@ -902,6 +928,21 @@ $('urlIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('addBtn')
 $('queue').addEventListener('click', e => {
   const b = e.target.closest('button[data-act]');
   if (b) act(b.dataset.act, { qid: b.dataset.qid });
+});
+$('djOpen').onclick = () => {
+  const open = $('djForm').hidden;
+  $('djForm').hidden = !open;
+  $('djOpen').textContent = open ? 'Close' : 'Ask the DJ';
+  $('djOpen').classList.toggle('ghost', open);
+  if (open) $('djIn').focus();
+};
+$('djForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = $('djIn').value.trim();
+  if (!text) { $('djIn').focus(); return; }
+  sendChat(text, true);
+  $('djIn').value = '';
+  $('djOpen').click();
 });
 $('chatForm').addEventListener('submit', e => {
   e.preventDefault();

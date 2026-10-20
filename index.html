@@ -67,13 +67,26 @@
       <div class="meter" id="meter" hidden>Sync: <b id="off">--</b></div>
     </div>
 
+    <div class="card" id="djCard">
+      <div class="row between">
+        <span class="label">DJ</span>
+        <button id="djOpen" class="small">Ask the DJ</button>
+      </div>
+      <p class="note" id="djEmpty">Tell the AI DJ a mood, artist or era, like "something calmer, old Bollywood". It finds songs and puts them next in the queue. Everyone sees every request here.</p>
+      <div class="dj-log" id="djLog" aria-live="polite" hidden></div>
+      <form class="row" id="djForm" hidden>
+        <input id="djIn" maxlength="200" placeholder="What should the DJ play?" autocomplete="off" aria-label="Request for the DJ">
+        <button type="submit">Send</button>
+      </form>
+    </div>
+
     <div class="card" id="gameCard">
       <div class="row between">
         <span class="label">Game</span>
         <span class="note" id="gameMeta"></span>
       </div>
       <div id="gameIdle" class="stack">
-        <p class="note">A quick music quiz, written by AI agents from the songs you've been playing. The winner controls the next 3 songs, and nobody else can skip.</p>
+        <p class="note">3 quick music questions, written by AI agents from the songs you've been playing. The winner controls the next 3 songs, and nobody else can skip.</p>
         <button id="gameBtn">Start a game</button>
       </div>
       <div id="gameLive" class="stack" hidden>
@@ -111,7 +124,7 @@
       <span class="label">Chat</span>
       <div class="chat" id="chat" aria-live="polite"></div>
       <form class="row" id="chatForm">
-        <input id="chatIn" maxlength="300" placeholder="Say something, or try @dj chill 90s songs" autocomplete="off" aria-label="Chat message">
+        <input id="chatIn" maxlength="300" placeholder="Say something" autocomplete="off" aria-label="Chat message">
         <button type="submit">Send</button>
       </form>
     </div>

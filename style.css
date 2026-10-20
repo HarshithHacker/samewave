@@ -72,4 +72,7 @@ input.code{font:500 22px var(--mono);letter-spacing:.2em;flex:0 0 7.5em;text-tra
 .g-scores{margin:0;padding-left:20px;font-size:14px;color:var(--muted)}
 @media (max-width:440px){.g-opts{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.g-timer span{transition:none}}
+button.small{min-height:36px;padding:6px 14px;font-size:14px}
+.dj-log{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;padding:10px;border-radius:12px;background:var(--sunk)}
+.msg.req b{color:var(--accent)}
 [hidden]{display:none!important}
