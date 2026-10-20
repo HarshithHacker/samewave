@@ -13,6 +13,14 @@ Live: https://samewave-pi.vercel.app
 - **Chat**: talk in the room. New people see recent messages.
 - **No single point of failure**: if the person keeping time leaves, the next person takes over automatically.
 
+## AI crews (Week 3 of the agents course, CrewAI style)
+
+- **@dj** (`api/dj.js`, `lib/dj-crew.js`): type `@dj something calmer` in chat. Vibe reader → song scout (custom YouTube search tool) → set curator → host. Code only queues songs that really came back from YouTube.
+- **Music quiz** (`api/game.js`, `lib/game-crew.js`): quizmaster and game host run in parallel, then a fact checker reviews the questions. Scoring happens in code. The winner controls the next 3 songs: only they can skip, add, reorder, pause or use @dj.
+- `lib/gemini.js` is a small CrewAI-like runner: agents (role, goal, backstory), tasks (description, expected output), structured output and tools.
+
+Setup: in Vercel, Settings → Environment Variables, add `GEMINI_API_KEY` (Gemini free tier) and `YOUTUBE_API_KEY` (YouTube Data API v3). Optional: `GEMINI_MODEL` to change the model (default `gemini-3.5-flash-lite`).
+
 ## How it works
 
 - Every phone plays its own copy of the song through the YouTube player.
@@ -24,11 +32,13 @@ Live: https://samewave-pi.vercel.app
 
 - `index.html`: page layout
 - `style.css`: styling
-- `app.js`: rooms, sync, queue, radio, chat
+- `app.js`: rooms, sync, queue, radio, chat, game and lock
+- `api/`: Vercel functions for the AI crews
+- `lib/`: the crews and their helpers
 
 ## Deploy
 
-Plain static site, no build step. Vercel deploys every push to `main`.
+Static site plus two Vercel functions, no build step. Vercel deploys every push to `main`.
 
 ## Limits
 

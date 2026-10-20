@@ -96,7 +96,27 @@ function sanitizeRoom(d) {
     queue: (Array.isArray(d.queue) ? d.queue : []).filter(q => q && okV(q.v)).slice(0, QUEUE_MAX)
       .map(q => ({ qid: clean(q.qid, 12), v: q.v, title: clean(q.title, 120), by: clean(q.by, 24), radio: !!q.radio })),
     members: (Array.isArray(d.members) ? d.members : []).slice(0, 50)
-      .map(m => ({ id: clean(m.id, 20), n: clean(m.n, 24), j: +m.j || 0 }))
+      .map(m => ({ id: clean(m.id, 20), n: clean(m.n, 24), j: +m.j || 0 })),
+    lock: sanitizeLock(d.lock),
+    game: sanitizeGame(d.game)
+  };
+}
+function sanitizeLock(l) {
+  if (!l || typeof l !== 'object' || !clean(l.id, 20)) return null;
+  return { id: clean(l.id, 20), n: clean(l.n, 24) || 'Someone', played: Math.max(0, +l.played || 0), max: Math.min(10, Math.max(1, +l.max || 3)) };
+}
+const GAME_STAGES = ['loading', 'q', 'reveal', 'over'];
+function sanitizeGame(g) {
+  if (!g || typeof g !== 'object' || !GAME_STAGES.includes(g.stage)) return null;
+  const arr = a => (Array.isArray(a) ? a : []);
+  return {
+    gid: clean(g.gid, 12), stage: g.stage, idx: Math.max(0, +g.idx || 0), total: Math.max(0, +g.total || 0),
+    q: clean(g.q, 200), options: arr(g.options).slice(0, 4).map(o => clean(o, 80)),
+    endsAt: +g.endsAt || 0, answerIdx: Number.isInteger(g.answerIdx) ? g.answerIdx : -1, fact: clean(g.fact, 200),
+    answered: arr(g.answered).slice(0, 50).map(x => clean(x, 20)),
+    right: arr(g.right).slice(0, 30).map(x => clean(x, 24)).filter(Boolean),
+    scores: arr(g.scores).slice(0, 50).filter(Boolean).map(x => ({ id: clean(x.id, 20), n: clean(x.n, 24) || 'Someone', pts: Math.max(0, +x.pts || 0) })),
+    winner: g.winner && g.winner.id ? { id: clean(g.winner.id, 20), n: clean(g.winner.n, 24) || 'Someone' } : null
   };
 }
 
@@ -171,7 +191,11 @@ function onPing(d) {
 function expireMembers() {
   const now = Date.now(); let changed = false;
   for (const id in members) {
-    if (now - members[id].seen > MEMBER_TIMEOUT) { sys(members[id].n + ' left'); knownIds.delete(id); delete members[id]; changed = true; }
+    if (now - members[id].seen > MEMBER_TIMEOUT) {
+      sys(members[id].n + ' left'); knownIds.delete(id);
+      if (room.lock && room.lock.id === id) { room.lock = null; sys('🔓 The lock is off because ' + members[id].n + ' left.'); }
+      delete members[id]; changed = true;
+    }
   }
   if (changed) pushState();
 }
@@ -181,7 +205,14 @@ function handleCtl(d) {
   if (!id || seenCtl.has(id)) return;           // the same request arrives once per relay server
   seenCtl.add(id);
   const who = clean(d.n, 24) || 'Someone';
+  const from = clean(d.from, 20);
+  if (d.t === 'answer') return onAnswer(d, from, who);
+  if (room.lock && from !== room.lock.id && LOCKED.includes(d.t)) {   // only the game winner can change things
+    if (d.t !== 'seek') lockedNotice();
+    return;
+  }
   switch (d.t) {
+    case 'game': startGame(who); break;
     case 'play':
       if (!room.videoId) { if (room.queue.length) advance(); }
       else if (ytReady) yt.playVideo();
@@ -194,7 +225,7 @@ function handleCtl(d) {
       if (room.videoId || room.queue.length) { sys(who + ' skipped'); advance(); }
       break;
     case 'prev': goPrev(); break;
-    case 'add': addLink(d.link, who); break;
+    case 'add': addLink(d.link, who, !!(room.lock && from === room.lock.id)); break;
     case 'remove': room.queue = room.queue.filter(q => q.qid !== d.qid); pushState(); break;
     case 'playnow': {
       const i = room.queue.findIndex(q => q.qid === d.qid);
@@ -213,21 +244,25 @@ function handleCtl(d) {
   }
 }
 
-function addLink(link, who) {
+function addLink(link, who, front) {
   if (!link || typeof link !== 'object') return;
   const v = okV(link.v) ? link.v : null;
   const list = typeof link.list === 'string' && /^[\w-]{10,64}$/.test(link.list) ? link.list : null;
-  if (list) { probeRun({ kind: 'list', list, v, who }); return; }
-  if (v) { insertItems([{ qid: rid(8), v, title: '', by: who }]); sys(who + ' added a song'); }
+  if (list) { probeRun({ kind: 'list', list, v, who, front }); return; }
+  if (v) { insertItems([{ qid: rid(8), v, title: '', by: who }], front); sys(who + ' added a song'); }
 }
-function insertItems(items) {
-  const i = room.queue.findIndex(q => q.radio);   // people's picks go ahead of radio picks
-  if (i < 0) room.queue.push(...items); else room.queue.splice(i, 0, ...items);
+function insertItems(items, front) {
+  if (front) insertFront(items, true);
+  else {
+    const i = room.queue.findIndex(q => q.radio);   // people's picks go ahead of radio picks
+    if (i < 0) room.queue.push(...items); else room.queue.splice(i, 0, ...items);
+  }
   room.queue = room.queue.slice(0, QUEUE_MAX);
   if (!room.videoId) advance(); else pushState();
   fetchTitles();
 }
 function advance() {
+  releaseLockIfDone();
   if (room.videoId) { played.push({ v: room.videoId, title: room.title, by: room.by }); played = played.slice(-30); }
   const item = room.queue.shift();
   if (!item) {
@@ -240,6 +275,8 @@ function advance() {
   playItem(item);
 }
 function playItem(item) {
+  releaseLockIfDone();                            // the winner's songs are done
+  if (room.lock) room.lock.played++;
   room.videoId = item.v; room.title = item.title || ''; room.by = item.radio ? 'Radio' : item.by;
   room.pos = 0; room.dur = 0; room.playing = true;
   loadedId = item.v;
@@ -295,7 +332,7 @@ function probeDone(job, ids) {
       let list = ids;
       if (job.v) { const i = ids.indexOf(job.v); if (i > 0) list = ids.slice(i); }
       if (list.length) {
-        insertItems(list.slice(0, QUEUE_MAX).map(v => ({ qid: rid(8), v, title: '', by: job.who })));
+        insertItems(list.slice(0, QUEUE_MAX).map(v => ({ qid: rid(8), v, title: '', by: job.who })), job.front);
         sys(job.who + ' added a playlist (' + Math.min(list.length, QUEUE_MAX) + ' songs)');
       } else {
         sys('Couldn\'t open that playlist. It has to be public or unlisted.');
@@ -341,6 +378,11 @@ function takeOver() {
   members = {};
   (old.members || []).forEach(m => { if (m.id !== me) { members[m.id] = { id: m.id, n: m.n, j: m.j, seen: now }; knownIds.add(m.id); } });
   room = { ...old, epoch: old.epoch + 1, hostId: me, left: false, at: now, pos };
+  if (room.game) {
+    const live = room.game.stage !== 'over';
+    room.game = null;
+    if (live) setTimeout(() => sys('The game was cancelled because the room\'s timekeeper changed. Start a new one any time.'), 1500);
+  }
   played = []; radioFor = null; bestRtt = Infinity; clockOff = 0;
   if (ytReady && room.videoId && loadedId !== room.videoId) { loadedId = room.videoId; yt.loadVideoById({ videoId: room.videoId, startSeconds: pos }); }
   closeAll(); connectAll(true);
@@ -391,23 +433,29 @@ function onChat(d) {
   const id = clean(d.id, 16);
   if (!id || seenMsg.has(id)) return;
   seenMsg.add(id);
-  const m = { id, at: +d.at || Date.now(), sys: !!d.sys, n: clean(d.n, 24) || 'Someone', text: clean(d.text, 300) };
+  const m = { id, at: +d.at || Date.now(), sys: !!d.sys, bot: clean(d.bot, 16), from: clean(d.from, 20), n: clean(d.n, 24) || 'Someone', text: clean(d.text, 300) };
   if (!m.text) return;
   chat.push(m);
   chat.sort((a, b) => a.at - b.at);
   if (chat.length > 100) chat = chat.slice(-100);
   renderChat();
-  if (role === 'host') scheduleChatlog();
+  if (role === 'host') {
+    scheduleChatlog();
+    if (!m.sys && !m.bot && Date.now() - m.at < 60000) {
+      if (/^@dj\b/i.test(m.text)) djRequest(m);
+      else if (/^@game\b/i.test(m.text)) handleCtl({ id: 'g' + m.id, n: m.n, from: m.from, t: 'game' });
+    }
+  }
 }
 function scheduleChatlog() {                     // so people who join later see recent messages
   if (chatlogTimer) return;
   chatlogTimer = setTimeout(() => {
     chatlogTimer = null;
-    if (role === 'host') pub('chatlog', chat.slice(-40).map(m => ({ id: m.id, at: m.at, sys: m.sys, n: m.n, text: m.text })), true);
+    if (role === 'host') pub('chatlog', chat.slice(-40).map(m => ({ id: m.id, at: m.at, sys: m.sys, bot: m.bot, n: m.n, text: m.text })), true);
   }, 1000);
 }
 function sendChat(text) {
-  const msg = { id: rid(12), n: myName, text: clean(text, 300), at: Date.now() + (role === 'listener' ? clockOff : 0) };
+  const msg = { id: rid(12), from: me, n: myName, text: clean(text, 300), at: Date.now() + (role === 'listener' ? clockOff : 0) };
   if (!msg.text) return;
   pub('chat', msg); onChat(msg);
 }
@@ -415,6 +463,221 @@ function sys(text) {
   if (role !== 'host') return;
   const msg = { id: rid(12), sys: true, text, at: Date.now() };
   pub('chat', msg); onChat(msg);
+}
+
+/* ---------------- the winner's lock ---------------- */
+const LOCKED = ['play', 'pause', 'seek', 'next', 'prev', 'add', 'remove', 'up', 'playnow', 'game'];
+const lockedOut = () => !!(room && room.lock && room.lock.id !== me);
+let lastLockNote = 0;
+function lockedNotice() {
+  if (Date.now() - lastLockNote < 4000) return;
+  lastLockNote = Date.now();
+  sys('🔒 ' + room.lock.n + ' won the game, so only ' + room.lock.n + ' can change the music right now.');
+}
+// DJ picks go to the front of the queue. The game winner's picks go ahead of everything.
+function insertFront(items, winnerPick) {
+  let i = 0;
+  while (i < room.queue.length && (room.queue[i].winnerPick || (!winnerPick && room.queue[i].front))) i++;
+  items.forEach(x => { if (winnerPick) x.winnerPick = true; else x.front = true; });
+  room.queue.splice(i, 0, ...items);
+}
+function releaseLockIfDone() {
+  if (!room.lock || room.lock.played < room.lock.max) return;
+  sys('🔓 ' + room.lock.n + '\'s turn is over. Everyone can control the music again.');
+  room.lock = null;
+  room.queue.forEach(q => { delete q.winnerPick; });
+}
+function bot(text, name) {                       // a message from one of the AI crews
+  if (role !== 'host') return;
+  const msg = { id: rid(12), bot: name, n: name, text: clean(text, 300), at: Date.now() };
+  pub('chat', msg); onChat(msg);
+}
+
+/* ---------------- @dj: the DJ crew ---------------- */
+let djBusy = false;
+async function djRequest(m) {
+  if (room.lock && m.from !== room.lock.id) { lockedNotice(); return; }
+  const request = m.text.replace(/^@dj\b[:,]?\s*/i, '').trim();
+  if (!request) { bot('Tell me what you want to hear, like "@dj chill 90s Bollywood".', 'DJ'); return; }
+  if (djBusy) { bot('Still working on the last request. One at a time!', 'DJ'); return; }
+  djBusy = true;
+  sys('🎧 The DJ crew is on it: reading the vibe and digging for songs…');
+  try {
+    const res = await fetch('/api/dj', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        request, who: m.n, nowPlaying: room.title || '',
+        recent: [...played.slice(-8).map(p => p.title), room.title].filter(Boolean),
+        recentIds: [...played.map(p => p.v), room.videoId, ...room.queue.map(q => q.v)].filter(Boolean)
+      })
+    });
+    const out = await res.json().catch(() => ({ ok: false, message: 'The DJ crew sent back something I couldn\'t read.' }));
+    if (role !== 'host') return;
+    if (!out.ok) { bot(out.message || 'I couldn\'t do that one. Try different words.', 'DJ'); return; }
+    const items = (Array.isArray(out.songs) ? out.songs : []).filter(x => x && okV(x.v)).slice(0, 8)
+      .map(x => ({ qid: rid(8), v: x.v, title: clean(x.title, 120), by: 'DJ' }));
+    if (!items.length) { bot('No playable songs came back. Try different words.', 'DJ'); return; }
+    if (out.brief && out.brief.summary) sys('Vibe: ' + clean(out.brief.summary, 140));
+    bot(out.intro || ('Coming up: ' + items[0].title), 'DJ');
+    insertFront(items, !!(room.lock && m.from === room.lock.id));
+    room.queue = room.queue.slice(0, QUEUE_MAX);
+    if (!room.videoId) advance(); else pushState();
+  } catch (e) {
+    bot('I couldn\'t reach the DJ crew. Check the connection and try again.', 'DJ');
+  } finally { djBusy = false; }
+}
+
+/* ---------------- the quiz game ----------------
+   The timekeeper keeps the questions and answers to itself. Everyone else only ever
+   sees the current question, and sees its answer at the reveal, so nobody can peek. */
+const Q_MS = 15000, REVEAL_MS = 6000, LOCK_SONGS = 3;
+let gameQs = null, gameAnswers = new Map(), gameTimer = null, gameBusy = false;
+let myAnswer = { gid: '', idx: -1, choice: -1 };
+
+async function startGame(who) {
+  if (room.lock) { sys('🔒 Finish ' + room.lock.n + '\'s turn before starting a new game.'); return; }
+  if (room.game || gameBusy) { sys('A game is already running.'); return; }
+  gameBusy = true;
+  room.game = { gid: rid(8), stage: 'loading', idx: 0, total: 0, q: '', options: [], endsAt: 0, answerIdx: -1, fact: '', answered: [], right: [], scores: [], winner: null };
+  sys('🎲 ' + who + ' started a game. The quiz crew is writing questions…');
+  pushState();
+  try {
+    const songs = [...played.map(p => p.title), room.title, ...room.queue.slice(0, 10).map(q => q.title)].filter(Boolean).slice(-25);
+    const res = await fetch('/api/game', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ songs, players: memberList().map(x => x.n) })
+    });
+    const out = await res.json().catch(() => ({ ok: false, message: 'The quiz crew sent back something I couldn\'t read.' }));
+    if (role !== 'host' || !room.game) return;
+    const qs = (Array.isArray(out.questions) ? out.questions : []).filter(q => q && Array.isArray(q.options) && q.options.length === 4 && q.answer_index >= 0 && q.answer_index < 4);
+    if (!out.ok || qs.length < 3) {
+      room.game = null; pushState();
+      bot(out.message || 'I couldn\'t put a quiz together right now. Try again in a minute.', 'Quizmaster');
+      return;
+    }
+    gameQs = qs.slice(0, 5);
+    room.game.total = gameQs.length;
+    room.game.scores = memberList().map(x => ({ id: x.id, n: x.n, pts: 0 }));
+    bot(out.intro || 'Quiz time! Fastest right answers score the most.', 'Quizmaster');
+    gameTimer = setTimeout(() => askQuestion(0), 2500);
+  } catch (e) {
+    room.game = null; pushState();
+    bot('I couldn\'t reach the quiz crew. Try again in a bit.', 'Quizmaster');
+  } finally { gameBusy = false; }
+}
+function askQuestion(i) {
+  const g = room.game;
+  if (role !== 'host' || !g || !gameQs) return;
+  const q = gameQs[i];
+  gameAnswers = new Map();
+  Object.assign(g, { stage: 'q', idx: i, q: q.question, options: q.options, endsAt: Date.now() + Q_MS, answerIdx: -1, fact: '', answered: [], right: [] });
+  pushState();
+  clearTimeout(gameTimer);
+  gameTimer = setTimeout(() => revealQuestion(i), Q_MS);
+}
+function onAnswer(d, from, who) {
+  const g = room.game;
+  if (role !== 'host' || !g || g.stage !== 'q' || d.gid !== g.gid || +d.idx !== g.idx || !from || gameAnswers.has(from)) return;
+  const choice = +d.choice;
+  if (!(choice >= 0 && choice < 4)) return;
+  if (!memberList().some(x => x.id === from)) return;   // only people in the room can play
+  gameAnswers.set(from, { choice, at: Date.now(), n: who });
+  g.answered = [...gameAnswers.keys()];
+  pushState();
+  if (gameAnswers.size >= memberList().length) {   // everyone answered, no need to wait
+    clearTimeout(gameTimer);
+    gameTimer = setTimeout(() => revealQuestion(g.idx), 700);
+  }
+}
+function revealQuestion(i) {
+  const g = room.game;
+  if (role !== 'host' || !g || g.idx !== i || g.stage !== 'q') return;
+  const q = gameQs[i], right = [];
+  gameAnswers.forEach((a, id) => {
+    if (a.choice !== q.answer_index) return;
+    const pts = 100 + Math.round(50 * Math.max(0, g.endsAt - a.at) / Q_MS);   // faster answers score more
+    let s = g.scores.find(x => x.id === id);
+    if (!s) { s = { id, n: a.n, pts: 0 }; g.scores.push(s); }
+    s.pts += pts;
+    right.push(a.n);
+  });
+  g.scores.sort((a, b) => b.pts - a.pts);
+  Object.assign(g, { stage: 'reveal', answerIdx: q.answer_index, fact: q.fact || '', right });
+  pushState();
+  clearTimeout(gameTimer);
+  gameTimer = setTimeout(() => (i + 1 < gameQs.length ? askQuestion(i + 1) : finishGame()), REVEAL_MS);
+}
+function finishGame() {
+  const g = room.game;
+  if (role !== 'host' || !g) return;
+  const top = g.scores[0];
+  g.stage = 'over';
+  if (top && top.pts > 0) {
+    g.winner = { id: top.id, n: top.n };
+    room.lock = { id: top.id, n: top.n, played: 0, max: LOCK_SONGS };
+    sys('🏆 ' + top.n + ' wins with ' + top.pts + ' points! ' + top.n + ' controls the next ' + LOCK_SONGS + ' songs. Add your picks or ask the DJ, ' + top.n + '.');
+  } else {
+    sys('Nobody scored this time, so nobody gets the lock.');
+  }
+  gameQs = null; gameAnswers = new Map();
+  pushState();
+  clearTimeout(gameTimer);
+  gameTimer = setTimeout(() => { if (room.game && room.game.stage === 'over') { room.game = null; pushState(); } }, 15000);
+}
+
+function renderLock() {
+  const l = room && room.lock, bar = $('lockBar');
+  bar.hidden = !l;
+  const out = lockedOut();
+  ['prevBtn', 'playBtn', 'nextBtn', 'addBtn'].forEach(id => { $(id).disabled = out; });
+  if (!l) return;
+  const mine = l.id === me;
+  const progress = l.played === 0 ? 'starts with the next song' : 'song ' + Math.min(l.played, l.max) + ' of ' + l.max;
+  bar.textContent = mine
+    ? '🔒 You won! You control the music: ' + progress + '. Add songs or use @dj, and they play first.'
+    : '🔒 ' + l.n + ' won the game and controls the music: ' + progress + '.';
+}
+function renderGame() {
+  const g = room && room.game;
+  $('gameIdle').hidden = !!g;
+  $('gameLive').hidden = !g;
+  $('gameBtn').disabled = !!(room && room.lock);
+  $('gameMeta').textContent = g && g.total && g.stage !== 'over' && g.stage !== 'loading' ? 'Question ' + (g.idx + 1) + ' of ' + g.total : '';
+  if (!g) return;
+  const opts = $('gOpts'), scores = $('gScores');
+  opts.textContent = ''; scores.textContent = '';
+  $('gTimer').hidden = g.stage !== 'q';
+  if (g.stage === 'loading') { $('gQ').textContent = 'The quiz crew is writing questions…'; $('gNote').textContent = 'This takes a few seconds.'; return; }
+  if (g.stage === 'over') {
+    $('gQ').textContent = g.winner ? '🏆 ' + g.winner.n + ' wins!' : 'Game over';
+    $('gNote').textContent = g.winner ? g.winner.n + ' controls the next ' + LOCK_SONGS + ' songs.' : 'Nobody scored this time.';
+  } else {
+    $('gQ').textContent = g.q;
+    const mine = myAnswer.gid === g.gid && myAnswer.idx === g.idx ? myAnswer.choice : -1;
+    g.options.forEach((o, i) => {
+      const b = document.createElement('button');
+      b.className = 'g-opt' + (g.stage === 'reveal' ? (i === g.answerIdx ? ' right' : i === mine ? ' wrong' : '') : i === mine ? ' picked' : '');
+      b.textContent = 'ABCD'[i] + '.  ' + o;
+      b.dataset.choice = i;
+      b.disabled = g.stage !== 'q' || mine >= 0;
+      opts.append(b);
+    });
+    const total = (room.members || []).length || 1;
+    $('gNote').textContent = g.stage === 'q'
+      ? (mine >= 0 ? 'Locked in. ' : '') + g.answered.length + ' of ' + total + ' answered'
+      : (g.right.length ? 'Got it: ' + g.right.join(', ') + '.' : 'Nobody got it.') + (g.fact ? ' ' + g.fact : '');
+  }
+  g.scores.filter(x => x.pts > 0).slice(0, 5).forEach(x => {
+    const li = document.createElement('li');
+    li.textContent = x.n + (x.id === me ? ' (you)' : '') + ': ' + x.pts;
+    scores.append(li);
+  });
+}
+function renderGameTimer() {
+  const g = room && room.game;
+  if (!g || g.stage !== 'q') return;
+  const now = role === 'host' ? Date.now() : Date.now() + clockOff;
+  $('gBar').style.width = Math.max(0, Math.min(100, (g.endsAt - now) / Q_MS * 100)) + '%';
 }
 
 /* ---------------- YouTube players ---------------- */
@@ -449,7 +712,7 @@ window.onYouTubeIframeAPIReady = initPlayers;
 if (window.YT && YT.Player) initPlayers();
 
 /* ---------------- rendering ---------------- */
-function renderAll() { renderStatus(); renderPeople(); renderNow(); renderQueue(); renderTap(); }
+function renderAll() { renderStatus(); renderPeople(); renderNow(); renderQueue(); renderTap(); renderLock(); renderGame(); }
 function renderStatus() {
   if (!inRoom) return;
   const live = anyConnected();
@@ -488,6 +751,7 @@ function renderQueue() {
     li.append(text);
     if (i > 0) { const up = document.createElement('button'); up.textContent = 'Up'; up.dataset.act = 'up'; up.dataset.qid = item.qid; up.setAttribute('aria-label', 'Move up'); li.append(up); }
     const rm = document.createElement('button'); rm.textContent = 'Remove'; rm.dataset.act = 'remove'; rm.dataset.qid = item.qid; li.append(rm);
+    if (lockedOut()) li.querySelectorAll('button').forEach(b => { b.disabled = true; });
     el.append(li);
   });
   $('qEmpty').hidden = q.length > 0;
@@ -501,9 +765,10 @@ function renderProgress() {
   const cur = has ? (mine ? yt.getCurrentTime() || 0 : expectedPos()) : 0;
   const dur = has ? (room.dur || (mine ? yt.getDuration() : 0) || 0) : 0;
   if (!seeking) $('seek').value = dur ? Math.min(1000, Math.round(cur / dur * 1000)) : 0;
-  $('seek').disabled = !has || !dur;
+  $('seek').disabled = !has || !dur || lockedOut();
   $('tCur').textContent = fmt(Math.min(cur, dur || cur));
   $('tDur').textContent = fmt(dur);
+  renderGameTimer();
 }
 function renderChat() {
   const el = $('chat');
@@ -513,7 +778,7 @@ function renderChat() {
     const div = document.createElement('div');
     if (m.sys) { div.className = 'msg sys'; div.textContent = m.text; }
     else {
-      div.className = 'msg';
+      div.className = 'msg' + (m.bot ? ' bot' : '');
       const b = document.createElement('b'); b.textContent = m.n + ': ';
       div.append(b, document.createTextNode(m.text));
     }
@@ -545,7 +810,7 @@ function enterRoom() {
 }
 function startHost() {
   role = 'host'; code = rand(); joinedAt = Date.now();
-  room = { epoch: 1, hostId: me, at: Date.now(), left: false, videoId: null, title: '', by: '', playing: false, pos: 0, dur: 0, queue: [], members: [] };
+  room = { epoch: 1, hostId: me, at: Date.now(), left: false, videoId: null, title: '', by: '', playing: false, pos: 0, dur: 0, queue: [], members: [], lock: null, game: null };
   connectAll(true);
   const w = setInterval(() => { if (anyConnected()) { clearInterval(w); enterRoom(); pushState(); } }, 200);
   setTimeout(() => {
@@ -580,7 +845,7 @@ function leave() {
 
 /* ---------------- controls ---------------- */
 function act(t, extra) {
-  const msg = { id: rid(12), n: myName, t, ...(extra || {}) };
+  const msg = { id: rid(12), from: me, n: myName, t, ...(extra || {}) };
   if (role === 'host') handleCtl(msg);
   else if (role === 'listener') pub('ctl', msg);
 }
@@ -654,6 +919,16 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   if (role === 'host') pushState();
   if (role === 'listener') { ping(); sync(); }
+});
+
+$('gameBtn').onclick = () => act('game');
+$('gOpts').addEventListener('click', e => {
+  const b = e.target.closest('button[data-choice]');
+  const g = room && room.game;
+  if (!b || !g || g.stage !== 'q') return;
+  myAnswer = { gid: g.gid, idx: g.idx, choice: +b.dataset.choice };
+  act('answer', { gid: g.gid, idx: g.idx, choice: +b.dataset.choice });
+  renderGame();
 });
 
 /* ---------------- timers ---------------- */

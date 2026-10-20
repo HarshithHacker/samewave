@@ -1,0 +1,7 @@
+{
+  "name": "samewave",
+  "private": true,
+  "type": "module",
+  "description": "Listen to YouTube together, in sync. Static site plus two Vercel functions (api/dj.js, api/game.js).",
+  "engines": { "node": ">=18" }
+}

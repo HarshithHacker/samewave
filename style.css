@@ -58,4 +58,18 @@ input.code{font:500 22px var(--mono);letter-spacing:.2em;flex:0 0 7.5em;text-tra
   .chat-card{height:calc(100vh - 32px);max-height:820px}
   .chat-card .chat{flex:1;height:auto;min-height:0}
 }
+.lock{font-size:14px;padding:10px 12px;border-radius:12px;background:var(--sunk);border:1.5px solid var(--accent)}
+.msg.bot b{color:var(--ok)}
+.g-q{font:600 17px/1.35 var(--body);overflow-wrap:anywhere}
+.g-timer{height:6px;border-radius:99px;background:var(--sunk);overflow:hidden}
+.g-timer span{display:block;height:100%;width:100%;background:var(--accent);transition:width .5s linear}
+.g-opts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.g-opt{background:var(--sunk);color:var(--ink);border:1.5px solid var(--line);text-align:left;font-weight:500;overflow-wrap:anywhere}
+.g-opt:disabled{opacity:.9;cursor:default}
+.g-opt.picked{border-color:var(--accent)}
+.g-opt.right{border-color:var(--ok);box-shadow:inset 0 0 0 1.5px var(--ok)}
+.g-opt.wrong{border-color:var(--live)}
+.g-scores{margin:0;padding-left:20px;font-size:14px;color:var(--muted)}
+@media (max-width:440px){.g-opts{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.g-timer span{transition:none}}
 [hidden]{display:none!important}

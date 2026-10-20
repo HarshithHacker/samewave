@@ -50,6 +50,7 @@
     <div class="card">
       <div class="vid"><div id="player"></div></div>
       <button id="tapBtn" class="big" hidden>Tap to start listening</button>
+      <div class="lock" id="lockBar" hidden></div>
       <div class="now">
         <div class="now-title" id="nowTitle">Nothing playing</div>
         <div class="note" id="nowBy">Add a song below to start</div>
@@ -64,6 +65,24 @@
         <button class="ghost" id="nextBtn" aria-label="Skip">Skip</button>
       </div>
       <div class="meter" id="meter" hidden>Sync: <b id="off">--</b></div>
+    </div>
+
+    <div class="card" id="gameCard">
+      <div class="row between">
+        <span class="label">Game</span>
+        <span class="note" id="gameMeta"></span>
+      </div>
+      <div id="gameIdle" class="stack">
+        <p class="note">A quick music quiz, written by AI agents from the songs you've been playing. The winner controls the next 3 songs, and nobody else can skip.</p>
+        <button id="gameBtn">Start a game</button>
+      </div>
+      <div id="gameLive" class="stack" hidden>
+        <div class="g-q" id="gQ"></div>
+        <div class="g-timer" id="gTimer"><span id="gBar"></span></div>
+        <div class="g-opts" id="gOpts"></div>
+        <p class="note" id="gNote"></p>
+        <ol class="g-scores" id="gScores"></ol>
+      </div>
     </div>
 
     <div class="card">
@@ -92,7 +111,7 @@
       <span class="label">Chat</span>
       <div class="chat" id="chat" aria-live="polite"></div>
       <form class="row" id="chatForm">
-        <input id="chatIn" maxlength="300" placeholder="Say something" autocomplete="off" aria-label="Chat message">
+        <input id="chatIn" maxlength="300" placeholder="Say something, or try @dj chill 90s songs" autocomplete="off" aria-label="Chat message">
         <button type="submit">Send</button>
       </form>
     </div>
