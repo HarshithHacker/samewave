@@ -631,6 +631,7 @@ function renderLock() {
   bar.hidden = !l;
   const out = lockedOut();
   ['prevBtn', 'playBtn', 'nextBtn', 'addBtn', 'djOpen'].forEach(id => { $(id).disabled = out; });
+  document.querySelectorAll('#djIdeas button').forEach(b => { b.disabled = out; });
   if (out && !$('djForm').hidden) $('djOpen').click();
   if (!l) return;
   const mine = l.id === me;
@@ -641,6 +642,9 @@ function renderLock() {
 }
 function renderGame() {
   const g = room && room.game;
+  if (g && g.gid && g.gid !== lastGameGid) { lastGameGid = g.gid; if (inRoom) setTab('game'); }
+  renderBadges();
+  $('gameLive').classList.toggle('won', !!(g && g.stage === 'over' && g.winner && g.winner.id === me));
   $('gameIdle').hidden = !!g;
   $('gameLive').hidden = !g;
   $('gameBtn').disabled = !!(room && room.lock);
@@ -720,7 +724,7 @@ function renderStatus() {
   const live = anyConnected();
   const silent = role === 'listener' && room && Date.now() - lastStateSeen > 4000;
   $('dot').classList.toggle('on', live && !silent);
-  const n = room && room.members ? room.members.length : 1;
+  const n = role === 'host' ? memberList().length : room && room.members ? room.members.length : 1;
   $('statusTxt').textContent = !live ? 'Reconnecting…' : silent ? 'Syncing…' : n + (n === 1 ? ' person' : ' people') + ' here';
 }
 function renderPeople() {
@@ -728,16 +732,21 @@ function renderPeople() {
   const list = role === 'host' ? memberList() : (room && room.members) || [];
   list.forEach(m => {
     const s = document.createElement('span');
-    s.className = 'chip' + (m.id === me ? ' me' : '');
-    s.textContent = (m.n || 'Someone') + (m.id === me ? ' (you)' : '');
+    s.className = 'chip' + (m.id === me ? ' me' : '') + (isNew(seenPeople, m.id) ? ' enter' : '');
+    const av = document.createElement('span'); av.className = 'av';
+    av.textContent = ((m.n || '?').trim()[0] || '?').toUpperCase();
+    s.append(av, document.createTextNode((m.n || 'Someone') + (m.id === me ? ' (you)' : '')));
     el.append(s);
   });
 }
 function renderNow() {
   const has = room && room.videoId;
   $('nowTitle').textContent = has ? (room.title || 'Loading…') : 'Nothing playing';
-  $('nowBy').textContent = has ? (room.by === 'Radio' ? 'Picked by radio' : 'Added by ' + (room.by || 'someone')) : 'Add a song below to start';
-  $('playBtn').textContent = has && room.playing ? 'Pause' : 'Play';
+  $('nowBy').textContent = has ? (room.by === 'Radio' ? 'Picked by radio' : room.by === 'DJ' ? 'Picked by the DJ' : 'Added by ' + (room.by || 'someone')) : 'Add a song to start';
+  const playing = !!(has && room.playing);
+  $('playBtn').dataset.state = playing ? 'pause' : 'play';
+  $('playBtn').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  $('eq').classList.toggle('on', playing);
   $('meter').hidden = role !== 'listener' || !has;
 }
 function renderQueue() {
@@ -745,19 +754,23 @@ function renderQueue() {
   const q = (room && room.queue) || [];
   q.forEach((item, i) => {
     const li = document.createElement('li');
+    if (isNew(seenQ, item.qid)) li.className = 'enter';
+    const n = document.createElement('span'); n.className = 'q-n'; n.textContent = i + 1;
+    li.append(n);
     const text = document.createElement('button'); text.className = 'q-text'; text.dataset.act = 'playnow'; text.dataset.qid = item.qid;
     text.title = 'Play now'; text.setAttribute('aria-label', 'Play ' + (item.title || 'this song') + ' now');
     const t = document.createElement('div'); t.className = 'q-title'; t.textContent = item.title || 'YouTube video';
-    const by = document.createElement('div'); by.className = 'q-by'; by.textContent = item.radio ? 'Radio' : 'Added by ' + (item.by || 'someone');
+    const by = document.createElement('div'); by.className = 'q-by' + (item.radio ? ' radio' : '');
+    by.textContent = item.radio ? 'Radio pick' : item.by === 'DJ' ? 'DJ pick' : 'Added by ' + (item.by || 'someone');
     text.append(t, by);
     li.append(text);
-    if (i > 0) { const up = document.createElement('button'); up.textContent = 'Up'; up.dataset.act = 'up'; up.dataset.qid = item.qid; up.setAttribute('aria-label', 'Move up'); li.append(up); }
-    const rm = document.createElement('button'); rm.textContent = 'Remove'; rm.dataset.act = 'remove'; rm.dataset.qid = item.qid; li.append(rm);
+    li.append(i > 0 ? iconBtn('up', item.qid, 'ph-arrow-up', 'Move up') : document.createElement('span'));
+    li.append(iconBtn('remove', item.qid, 'ph-x', 'Remove'));
     if (lockedOut()) li.querySelectorAll('button').forEach(b => { b.disabled = true; });
     el.append(li);
   });
   $('qEmpty').hidden = q.length > 0;
-  $('qCount').textContent = q.length ? q.length + (q.length === 1 ? ' song' : ' songs') : '';
+  $('qCount').textContent = q.length ? String(q.length) : '';
 }
 function renderTap() { $('tapBtn').hidden = !(room && room.videoId && !unlocked); }
 function renderProgress() {
@@ -767,6 +780,7 @@ function renderProgress() {
   const cur = has ? (mine ? yt.getCurrentTime() || 0 : expectedPos()) : 0;
   const dur = has ? (room.dur || (mine ? yt.getDuration() : 0) || 0) : 0;
   if (!seeking) $('seek').value = dur ? Math.min(1000, Math.round(cur / dur * 1000)) : 0;
+  $('seek').style.setProperty('--p', ($('seek').value / 10) + '%');
   $('seek').disabled = !has || !dur || lockedOut();
   $('tCur').textContent = fmt(Math.min(cur, dur || cur));
   $('tDur').textContent = fmt(dur);
@@ -778,15 +792,18 @@ function renderChat() {
   el.textContent = '';
   chat.filter(m => !m.dj || m.ann).forEach(m => {
     const div = document.createElement('div');
-    if (m.sys) { div.className = 'msg sys'; div.textContent = m.text; }
+    const fresh = isNew(seenChat, m.id);
+    if (fresh && !m.sys && m.from !== me && !chatVisible()) unread.chat++;
+    if (m.sys) { div.className = 'msg sys' + (fresh ? ' enter' : ''); div.textContent = m.text; }
     else {
-      div.className = 'msg' + (m.bot ? ' bot' : '');
+      div.className = 'msg' + (m.bot ? ' bot' : '') + (fresh ? ' enter' : '');
       const b = document.createElement('b'); b.textContent = m.n + ': ';
       div.append(b, document.createTextNode(m.text));
     }
     el.append(div);
   });
   if (atBottom) el.scrollTop = el.scrollHeight;
+  renderBadges();
 }
 
 function renderDj() {
@@ -798,19 +815,61 @@ function renderDj() {
   el.textContent = '';
   list.forEach(m => {
     const div = document.createElement('div');
-    if (m.sys) { div.className = 'msg sys'; div.textContent = m.text; }
+    const fresh = isNew(seenDj, m.id);
+    if (fresh && m.from !== me && tab !== 'dj') unread.dj++;
+    if (m.sys) { div.className = 'msg sys' + (fresh ? ' enter' : ''); div.textContent = m.text; }
     else if (m.bot) {
-      div.className = 'msg bot';
+      div.className = 'msg bot' + (fresh ? ' enter' : '');
       const b = document.createElement('b'); b.textContent = 'DJ: ';
       div.append(b, document.createTextNode(m.text.replace(/^🎧\s*/, '')));
     } else {
-      div.className = 'msg req';
+      div.className = 'msg req' + (fresh ? ' enter' : '');
       const b = document.createElement('b'); b.textContent = m.n + ' asked: ';
       div.append(b, document.createTextNode(m.text.replace(/^@dj\b[:,]?\s*/i, '')));
     }
     el.append(div);
   });
   if (atBottom) el.scrollTop = el.scrollHeight;
+  renderBadges();
+}
+
+/* ---------------- tabs, badges and small UI helpers ---------------- */
+const seenPeople = new Set(), seenQ = new Set(), seenChat = new Set(), seenDj = new Set();
+function isNew(set, id) { if (set.has(id)) return false; set.add(id); return true; }
+function iconBtn(act, qid, icon, label) {
+  const b = document.createElement('button');
+  b.className = 'icon-btn'; b.dataset.act = act; b.dataset.qid = qid;
+  b.setAttribute('aria-label', label); b.title = label;
+  const i = document.createElement('i'); i.className = 'ph ' + icon; i.setAttribute('aria-hidden', 'true');
+  b.append(i);
+  return b;
+}
+let tab = 'queue', lastGameGid = '';
+const unread = { chat: 0, dj: 0 };
+const wide = () => window.matchMedia('(min-width: 980px)').matches;
+const chatVisible = () => wide() || tab === 'chat';
+function setTab(name) {
+  if (name === 'chat' && wide()) name = 'queue';
+  tab = name;
+  $('roomView').dataset.tab = name;
+  document.querySelectorAll('#tabs [role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  document.querySelectorAll('.room-main [data-panel]').forEach(p => { p.hidden = p.dataset.panel !== name; });
+  if (name === 'chat') { unread.chat = 0; const c = $('chat'); c.scrollTop = c.scrollHeight; }
+  if (name === 'dj') unread.dj = 0;
+  moveInk(); renderBadges();
+}
+function moveInk() {
+  const b = document.querySelector('#tabs [aria-selected="true"]'), bar = $('tabs');
+  if (!b || !b.offsetWidth) return;
+  bar.style.setProperty('--x', b.offsetLeft + 'px');
+  bar.style.setProperty('--w', b.offsetWidth + 'px');
+}
+function renderBadges() {
+  if (chatVisible()) unread.chat = 0;
+  const show = (id, n) => { $(id).hidden = !n; $(id).textContent = n > 9 ? '9+' : n ? String(n) : ''; };
+  show('chatBadge', unread.chat);
+  show('djBadge', unread.dj);
+  $('gameBadge').hidden = !(room && room.game && room.game.stage !== 'over' && tab !== 'game');
 }
 
 /* ---------------- start, join, leave ---------------- */
@@ -833,6 +892,7 @@ function enterRoom() {
   $('codeOut').textContent = code;
   history.replaceState(null, '', '#' + code);
   renderAll(); renderChat(); renderDj();
+  setTab(tab);
 }
 function startHost() {
   role = 'host'; code = rand(); joinedAt = Date.now();
@@ -912,7 +972,7 @@ $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn
 $('playBtn').onclick = () => act(room && room.videoId && room.playing ? 'pause' : 'play');
 $('nextBtn').onclick = () => act('next');
 $('prevBtn').onclick = () => act('prev');
-$('seek').addEventListener('input', () => { seeking = true; });
+$('seek').addEventListener('input', () => { seeking = true; $('seek').style.setProperty('--p', ($('seek').value / 10) + '%'); });
 $('seek').addEventListener('change', () => {
   seeking = false;
   if (room && room.dur) act('seek', { pos: $('seek').value / 1000 * room.dur });
@@ -928,6 +988,27 @@ $('urlIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('addBtn')
 $('queue').addEventListener('click', e => {
   const b = e.target.closest('button[data-act]');
   if (b) act(b.dataset.act, { qid: b.dataset.qid });
+});
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('[role="tab"]');
+  if (b) setTab(b.dataset.tab);
+});
+window.addEventListener('resize', () => { if (tab === 'chat' && wide()) setTab('queue'); else { moveInk(); renderBadges(); } });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveInk);
+$('copyBtn').onclick = async () => {
+  const link = location.origin + location.pathname + '#' + code;
+  let ok = false;
+  try { await navigator.clipboard.writeText(link); ok = true; } catch (e) {}
+  $('copiedTxt').textContent = ok ? 'Invite link copied' : 'Code: ' + code;
+  clearTimeout($('copyBtn')._t);
+  $('copyBtn')._t = setTimeout(() => { $('copiedTxt').textContent = ''; }, 2000);
+};
+$('djIdeas').addEventListener('click', e => {
+  const b = e.target.closest('button[data-idea]');
+  if (!b || b.disabled) return;
+  if ($('djForm').hidden) $('djOpen').click();
+  $('djIn').value = b.dataset.idea;
+  $('djIn').focus();
 });
 $('djOpen').onclick = () => {
   const open = $('djForm').hidden;

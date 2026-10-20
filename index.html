@@ -3,133 +3,167 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#100f0e">
+<meta name="description" content="Listen to the same YouTube songs in sync on everyone's phone. Start a room, share the code, put your headphones on.">
 <title>Samewave</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Instrument+Sans:wght@400;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23100f0e'/%3E%3Crect x='7' y='12' width='4' height='8' rx='2' fill='%23ec8758'/%3E%3Crect x='14' y='7' width='4' height='18' rx='2' fill='%23ec8758'/%3E%3Crect x='21' y='10' width='4' height='12' rx='2' fill='%23ec8758'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Samewave</h1>
-    <p class="lede">Listen to the same YouTube songs on everyone's phone, in sync. Headphones on, together.</p>
-  </header>
+<a class="skip" href="#main">Skip to content</a>
 
-  <!-- Start screen -->
-  <section id="start" class="stack">
-    <div class="card">
-      <label class="label" for="nameIn">Your name</label>
-      <input id="nameIn" maxlength="24" placeholder="What should friends call you?" autocomplete="nickname">
-    </div>
-    <div class="card">
-      <span class="label">Start a room</span>
-      <p class="note">You get a code to share. Everyone in the room can add songs and control playback.</p>
-      <button id="hostBtn">Start a room</button>
-    </div>
-    <div class="card">
-      <span class="label">Join a room</span>
-      <div class="row">
-        <input id="codeIn" class="code" maxlength="6" placeholder="code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Room code">
-        <button id="joinBtn">Join</button>
-      </div>
-    </div>
-    <p class="err" id="startErr" hidden></p>
+<!-- ============ Start screen ============ -->
+<main id="start" class="start">
+  <section class="start-hero">
+    <div class="eq big on" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <h1 class="wordmark">samewave</h1>
+    <p class="lede">The same song, at the same second, on every phone in the room. Headphones on, together.</p>
   </section>
 
-  <!-- Room -->
-  <section id="roomView" class="room" hidden>
-    <div class="main stack">
-    <div class="card">
-      <div class="row between">
-        <span class="label">Room code</span>
-        <span class="status"><span class="dot" id="dot"></span><span id="statusTxt">Connecting…</span></span>
-      </div>
-      <div class="code-out" id="codeOut">----</div>
-      <div class="people" id="people" aria-label="People in the room"></div>
+  <section class="start-form" aria-label="Start or join a room">
+    <div class="field">
+      <label for="nameIn">Your name</label>
+      <input id="nameIn" maxlength="24" placeholder="What friends call you" autocomplete="nickname">
     </div>
 
-    <div class="card">
-      <div class="vid"><div id="player"></div></div>
-      <button id="tapBtn" class="big" hidden>Tap to start listening</button>
-      <div class="lock" id="lockBar" hidden></div>
-      <div class="now">
-        <div class="now-title" id="nowTitle">Nothing playing</div>
-        <div class="note" id="nowBy">Add a song below to start</div>
+    <button id="hostBtn" class="btn primary wide">Start a room</button>
+
+    <div class="or"><span>or join one</span></div>
+
+    <div class="field">
+      <label for="codeIn">Room code</label>
+      <div class="join-row">
+        <input id="codeIn" class="code" maxlength="6" placeholder="k7mp" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="joinBtn" class="btn">Join</button>
       </div>
+    </div>
+    <p class="err" id="startErr" role="alert" hidden></p>
+  </section>
+</main>
+
+<!-- ============ Room ============ -->
+<div id="roomView" class="room" hidden>
+  <header class="topbar">
+    <div class="brand"><div class="eq" id="eq" aria-hidden="true"><i></i><i></i><i></i></div><span>samewave</span></div>
+    <button class="code-pill" id="copyBtn" aria-label="Copy invite link">
+      <span class="code-out" id="codeOut">----</span>
+      <i class="ph ph-link" aria-hidden="true"></i>
+      <span class="copied" id="copiedTxt" aria-live="polite"></span>
+    </button>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusTxt">Connecting…</span></div>
+    <button class="icon-btn" id="leaveBtn" aria-label="Leave room" title="Leave room"><i class="ph ph-sign-out" aria-hidden="true"></i></button>
+  </header>
+
+  <div class="people" id="people" aria-label="People in the room"></div>
+
+  <main id="main" class="room-main">
+    <section class="player" aria-label="Now playing">
+      <div class="vid"><div id="player"></div>
+        <button id="tapBtn" class="tap" hidden><i class="ph-fill ph-headphones" aria-hidden="true"></i><span>Tap to start listening</span></button>
+      </div>
+
+      <div class="now">
+        <div class="now-text">
+          <h2 class="now-title" id="nowTitle">Nothing playing</h2>
+          <p class="now-by" id="nowBy">Add a song to start</p>
+        </div>
+        <div class="meter" id="meter" hidden>sync <b id="off">--</b></div>
+      </div>
+
       <div class="progress">
         <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Song position">
         <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
       </div>
+
       <div class="controls">
-        <button class="ghost" id="prevBtn" aria-label="Previous">Previous</button>
-        <button id="playBtn">Play</button>
-        <button class="ghost" id="nextBtn" aria-label="Skip">Skip</button>
+        <button class="icon-btn lg" id="prevBtn" aria-label="Previous"><i class="ph-fill ph-skip-back" aria-hidden="true"></i></button>
+        <button class="play" id="playBtn" aria-label="Play" data-state="play">
+          <i class="ph-fill ph-play i-play" aria-hidden="true"></i><i class="ph-fill ph-pause i-pause" aria-hidden="true"></i>
+        </button>
+        <button class="icon-btn lg" id="nextBtn" aria-label="Skip"><i class="ph-fill ph-skip-forward" aria-hidden="true"></i></button>
       </div>
-      <div class="meter" id="meter" hidden>Sync: <b id="off">--</b></div>
-    </div>
 
-    <div class="card" id="djCard">
-      <div class="row between">
-        <span class="label">DJ</span>
-        <button id="djOpen" class="small">Ask the DJ</button>
+      <div class="lock" id="lockBar" role="status" hidden></div>
+    </section>
+
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Room sections">
+      <button role="tab" data-tab="queue" aria-selected="true"><i class="ph ph-queue" aria-hidden="true"></i>Up next<span class="badge count" id="qCount"></span></button>
+      <button role="tab" data-tab="dj" aria-selected="false"><i class="ph ph-sparkle" aria-hidden="true"></i>DJ<span class="badge" id="djBadge" hidden></span></button>
+      <button role="tab" data-tab="game" aria-selected="false"><i class="ph ph-game-controller" aria-hidden="true"></i>Game<span class="badge live" id="gameBadge" hidden></span></button>
+      <button role="tab" data-tab="chat" aria-selected="false" class="tab-chat"><i class="ph ph-chat-circle" aria-hidden="true"></i>Chat<span class="badge" id="chatBadge" hidden></span></button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+
+    <!-- Up next -->
+    <section class="panel" data-panel="queue" role="tabpanel" aria-label="Up next">
+      <div class="add-row">
+        <label class="sr" for="urlIn">Add a song</label>
+        <input id="urlIn" placeholder="Paste a YouTube song or playlist link" autocomplete="off">
+        <button id="addBtn" class="btn primary" type="button"><i class="ph ph-plus" aria-hidden="true"></i><span>Add</span></button>
       </div>
-      <p class="note" id="djEmpty">Tell the AI DJ a mood, artist or era, like "something calmer, old Bollywood". It finds songs and puts them next in the queue. Everyone sees every request here.</p>
-      <div class="dj-log" id="djLog" aria-live="polite" hidden></div>
-      <form class="row" id="djForm" hidden>
-        <input id="djIn" maxlength="200" placeholder="What should the DJ play?" autocomplete="off" aria-label="Request for the DJ">
-        <button type="submit">Send</button>
+      <p class="hint" id="addNote">Anyone can add. Tap a song to play it now. Playlists need to be public or unlisted.</p>
+      <ol class="queue" id="queue"></ol>
+      <div class="empty" id="qEmpty">
+        <i class="ph ph-vinyl-record" aria-hidden="true"></i>
+        <p>Nothing queued yet. When a song ends with an empty queue, radio adds similar songs on its own.</p>
+      </div>
+    </section>
+
+    <!-- DJ -->
+    <section class="panel" data-panel="dj" role="tabpanel" aria-label="DJ" hidden>
+      <div class="dj-head">
+        <p>Tell the AI DJ a mood, artist or era. It finds real songs and puts them next. Everyone sees every request.</p>
+        <button id="djOpen" class="btn primary">Ask the DJ</button>
+      </div>
+      <form class="add-row" id="djForm" hidden>
+        <label class="sr" for="djIn">Request for the DJ</label>
+        <input id="djIn" maxlength="200" placeholder="something calmer, old Bollywood" autocomplete="off">
+        <button type="submit" class="btn primary" aria-label="Send to the DJ"><i class="ph-fill ph-paper-plane-right" aria-hidden="true"></i></button>
       </form>
-    </div>
+      <div class="ideas" id="djIdeas" aria-label="Ideas to try">
+        <button type="button" data-idea="something calmer, old Bollywood">Calmer, old Bollywood</button>
+        <button type="button" data-idea="upbeat Punjabi party songs">Punjabi party</button>
+        <button type="button" data-idea="late night lofi Hindi songs">Late night lofi</button>
+        <button type="button" data-idea="2000s English pop throwbacks">2000s throwbacks</button>
+      </div>
+      <p class="hint" id="djEmpty">No requests yet. Tap an idea or ask for anything.</p>
+      <div class="log" id="djLog" aria-live="polite" hidden></div>
+    </section>
 
-    <div class="card" id="gameCard">
-      <div class="row between">
-        <span class="label">Game</span>
-        <span class="note" id="gameMeta"></span>
+    <!-- Game -->
+    <section class="panel" data-panel="game" role="tabpanel" aria-label="Game" hidden>
+      <div id="gameIdle" class="game-idle">
+        <i class="ph-fill ph-trophy" aria-hidden="true"></i>
+        <h3>3 questions. Fastest right answers win.</h3>
+        <p>AI agents write a quick music quiz from the songs you've been playing. The winner controls the next 3 songs, and nobody else can skip.</p>
+        <button id="gameBtn" class="btn primary">Start a game</button>
       </div>
-      <div id="gameIdle" class="stack">
-        <p class="note">3 quick music questions, written by AI agents from the songs you've been playing. The winner controls the next 3 songs, and nobody else can skip.</p>
-        <button id="gameBtn">Start a game</button>
-      </div>
-      <div id="gameLive" class="stack" hidden>
-        <div class="g-q" id="gQ"></div>
+      <div id="gameLive" class="game-live" hidden>
+        <div class="game-top"><span class="game-meta" id="gameMeta"></span></div>
+        <h3 class="g-q" id="gQ"></h3>
         <div class="g-timer" id="gTimer"><span id="gBar"></span></div>
         <div class="g-opts" id="gOpts"></div>
-        <p class="note" id="gNote"></p>
+        <p class="hint" id="gNote"></p>
         <ol class="g-scores" id="gScores"></ol>
       </div>
-    </div>
+    </section>
+  </main>
 
-    <div class="card">
-      <label class="label" for="urlIn">Add to queue</label>
-      <div class="row">
-        <input id="urlIn" placeholder="Paste a song, video or playlist link" autocomplete="off">
-        <button id="addBtn">Add</button>
-      </div>
-      <p class="note" id="addNote">Anyone in the room can add. Playlists must be public or unlisted.</p>
-    </div>
-
-    <div class="card">
-      <div class="row between">
-        <span class="label">Up next</span>
-        <span class="note" id="qCount"></span>
-      </div>
-      <ol class="queue" id="queue"></ol>
-      <p class="note" id="qEmpty">Nothing queued. When a song ends with nothing queued, Samewave adds similar songs automatically.</p>
-    </div>
-
-    <button class="ghost" id="leaveBtn">Leave room</button>
-    </div>
-
-    <aside class="side">
-    <div class="card chat-card">
-      <span class="label">Chat</span>
-      <div class="chat" id="chat" aria-live="polite"></div>
-      <form class="row" id="chatForm">
-        <input id="chatIn" maxlength="300" placeholder="Say something" autocomplete="off" aria-label="Chat message">
-        <button type="submit">Send</button>
-      </form>
-    </div>
-    </aside>
-  </section>
+  <!-- Chat: right column on wide screens, a tab on phones -->
+  <aside class="side" data-panel="chat" aria-label="Chat">
+    <div class="side-head"><h2>Chat</h2></div>
+    <div class="log chat" id="chat" aria-live="polite"></div>
+    <form class="add-row" id="chatForm">
+      <label class="sr" for="chatIn">Chat message</label>
+      <input id="chatIn" maxlength="300" placeholder="Say something" autocomplete="off">
+      <button type="submit" class="btn primary" aria-label="Send"><i class="ph-fill ph-paper-plane-right" aria-hidden="true"></i></button>
+    </form>
+  </aside>
 </div>
 
 <div class="probe" aria-hidden="true"><div id="probe"></div></div>
