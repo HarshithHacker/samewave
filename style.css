@@ -289,6 +289,13 @@ input.code { font-family: var(--mono); font-size: 20px; letter-spacing: 0.18em; 
 .q-by { font-size: 13px; color: var(--muted); }
 .q-by.radio { color: var(--accent); }
 .queue .icon-btn { width: 36px; height: 36px; font-size: 18px; }
+.queue .drag { cursor: grab; touch-action: none; color: var(--faint); }
+.queue li.dragging {
+  position: relative; z-index: 2; background: var(--raised); transition: none;
+  box-shadow: 0 0 0 1px var(--accent), 0 14px 30px -12px rgba(0, 0, 0, 0.7);
+}
+.queue li.dragging .drag { cursor: grabbing; color: var(--accent); }
+body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 @media (hover: hover) and (pointer: fine) {
   .queue li:hover { background: var(--raised); }
   .queue button.q-text:hover:not(:disabled) .q-title { color: var(--accent); }

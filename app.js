@@ -241,6 +241,10 @@ function handleCtl(d) {
       if (i > 0) { const [it] = room.queue.splice(i, 1); room.queue.splice(i - 1, 0, it); pushState(); }
       break;
     }
+    case 'move': {
+      if (moveInQueue(room.queue, d.qid, +d.to)) pushState();
+      break;
+    }
   }
 }
 
@@ -467,7 +471,7 @@ function sys(text, dj) {
 }
 
 /* ---------------- the winner's lock ---------------- */
-const LOCKED = ['play', 'pause', 'seek', 'next', 'prev', 'add', 'remove', 'up', 'playnow', 'game'];
+const LOCKED = ['play', 'pause', 'seek', 'next', 'prev', 'add', 'remove', 'up', 'move', 'playnow', 'game'];
 const lockedOut = () => !!(room && room.lock && room.lock.id !== me);
 let lastLockNote = 0;
 function lockedNotice() {
@@ -750,7 +754,11 @@ function renderNow() {
   $('meter').hidden = role !== 'listener' || !has;
 }
 function renderQueue() {
-  const el = $('queue'); el.textContent = '';
+  if (drag) return;                              // don't rebuild the list while a song is being dragged
+  const el = $('queue');
+  const act0 = document.activeElement;
+  if (!focusQid && act0 && act0.classList && act0.classList.contains('drag') && el.contains(act0)) focusQid = act0.dataset.qid;
+  el.textContent = '';
   const q = (room && room.queue) || [];
   q.forEach((item, i) => {
     const li = document.createElement('li');
@@ -764,11 +772,14 @@ function renderQueue() {
     by.textContent = item.radio ? 'Radio pick' : item.by === 'DJ' ? 'DJ pick' : 'Added by ' + (item.by || 'someone');
     text.append(t, by);
     li.append(text);
-    li.append(i > 0 ? iconBtn('up', item.qid, 'ph-arrow-up', 'Move up') : document.createElement('span'));
+    const handle = iconBtn('', item.qid, 'ph-dots-six-vertical', 'Drag to reorder, or use the arrow keys');
+    handle.classList.add('drag'); delete handle.dataset.act;
+    li.append(handle);
     li.append(iconBtn('remove', item.qid, 'ph-x', 'Remove'));
     if (lockedOut()) li.querySelectorAll('button').forEach(b => { b.disabled = true; });
     el.append(li);
   });
+  if (focusQid) { const f = el.querySelector('.drag[data-qid="' + focusQid + '"]'); if (f) f.focus(); focusQid = null; }
   $('qEmpty').hidden = q.length > 0;
   $('qCount').textContent = q.length ? String(q.length) : '';
 }
@@ -832,6 +843,76 @@ function renderDj() {
   if (atBottom) el.scrollTop = el.scrollHeight;
   renderBadges();
 }
+
+/* ---------------- drag to reorder the queue ----------------
+   The row follows your finger 1:1, the other rows slide out of the way,
+   and on release the move is sent to the room (and shown right away here). */
+let drag = null, focusQid = null;
+function moveInQueue(list, qid, to) {
+  const i = list.findIndex(q => q.qid === qid);
+  if (i < 0 || !Number.isFinite(to)) return false;
+  to = Math.max(0, Math.min(list.length - 1, Math.round(to)));
+  if (to === i) return false;
+  const [it] = list.splice(i, 1);
+  list.splice(to, 0, it);
+  return true;
+}
+function sendMove(qid, to) {
+  if (role === 'listener' && room) { moveInQueue(room.queue, qid, to); }   // show it right away; the room confirms
+  act('move', { qid, to });
+  renderQueue();
+}
+$('queue').addEventListener('pointerdown', e => {
+  const h = e.target.closest('.drag');
+  if (!h || h.disabled || e.button > 0) return;
+  const rows = [...$('queue').children], li = h.closest('li'), from = rows.indexOf(li);
+  if (from < 0 || rows.length < 2) return;
+  const rects = rows.map(r => r.getBoundingClientRect());
+  const step = rects.length > 1 ? rects[1].top - rects[0].top : rects[0].height + 6;
+  drag = { qid: h.dataset.qid, li, rows, rects, from, to: from, y0: e.clientY, step, moved: false };
+  try { h.setPointerCapture(e.pointerId); } catch (err) {}
+  li.classList.add('dragging');
+  document.body.classList.add('is-dragging');
+  e.preventDefault();
+});
+$('queue').addEventListener('pointermove', e => {
+  if (!drag) return;
+  const { rects, from, rows, step } = drag;
+  const min = rects[0].top - rects[from].top, max = rects[rects.length - 1].top - rects[from].top;
+  const dy = Math.max(min - step * 0.3, Math.min(max + step * 0.3, e.clientY - drag.y0));
+  if (Math.abs(dy) > 3) drag.moved = true;
+  drag.li.style.transform = 'translateY(' + dy + 'px) scale(1.02)';
+  const to = Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / step)));
+  if (to !== drag.to) {
+    drag.to = to;
+    rows.forEach((r, i) => {
+      if (i === from) return;
+      const shift = from < to && i > from && i <= to ? -step : to < from && i >= to && i < from ? step : 0;
+      r.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+    });
+  }
+});
+function endDrag(cancel) {
+  if (!drag) return;
+  const { qid, from, to, rows, li } = drag;
+  rows.forEach(r => { r.style.transform = ''; });
+  li.classList.remove('dragging');
+  document.body.classList.remove('is-dragging');
+  drag = null;
+  if (!cancel && to !== from) sendMove(qid, to); else renderQueue();
+}
+$('queue').addEventListener('pointerup', () => endDrag(false));
+$('queue').addEventListener('pointercancel', () => endDrag(true));
+$('queue').addEventListener('keydown', e => {
+  const h = e.target.closest('.drag');
+  if (!h || h.disabled || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const i = room.queue.findIndex(q => q.qid === h.dataset.qid);
+  const to = i + (e.key === 'ArrowUp' ? -1 : 1);
+  if (i < 0 || to < 0 || to >= room.queue.length) return;
+  focusQid = h.dataset.qid;
+  sendMove(h.dataset.qid, to);
+});
 
 /* ---------------- tabs, badges and small UI helpers ---------------- */
 const seenPeople = new Set(), seenQ = new Set(), seenChat = new Set(), seenDj = new Set();
