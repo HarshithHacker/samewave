@@ -111,8 +111,12 @@ function sanitizeGame(g) {
   const arr = a => (Array.isArray(a) ? a : []);
   return {
     gid: clean(g.gid, 12), stage: g.stage, idx: Math.max(0, +g.idx || 0), total: Math.max(0, +g.total || 0),
+    mode: ['quiz', 'intro', 'emoji'].includes(g.mode) ? g.mode : 'quiz',
     q: clean(g.q, 200), options: arr(g.options).slice(0, 4).map(o => clean(o, 80)),
-    endsAt: +g.endsAt || 0, answerIdx: Number.isInteger(g.answerIdx) ? g.answerIdx : -1, fact: clean(g.fact, 200),
+    emoji: clean(g.emoji, 60), label: clean(g.label, 12), hint: clean(g.hint, 120), answer: clean(g.answer, 160),
+    clip: g.clip && okV(g.clip.v) ? { key: clean(g.clip.key, 8), v: g.clip.v, start: Math.max(0, +g.clip.start || 0), len: Math.min(10, Math.max(1, +g.clip.len || 3)), at: +g.clip.at || 0 } : null,
+    endsAt: +g.endsAt || 0, roundMs: Math.min(60000, Math.max(5000, +g.roundMs || 15000)),
+    answerIdx: Number.isInteger(g.answerIdx) ? g.answerIdx : -1, fact: clean(g.fact, 200),
     answered: arr(g.answered).slice(0, 50).map(x => clean(x, 20)),
     right: arr(g.right).slice(0, 30).map(x => clean(x, 24)).filter(Boolean),
     scores: arr(g.scores).slice(0, 50).filter(Boolean).map(x => ({ id: clean(x.id, 20), n: clean(x.n, 24) || 'Someone', pts: Math.max(0, +x.pts || 0) })),
@@ -207,12 +211,17 @@ function handleCtl(d) {
   const who = clean(d.n, 24) || 'Someone';
   const from = clean(d.from, 20);
   if (d.t === 'answer') return onAnswer(d, from, who);
+  if (d.t === 'guess') return onGuess(d, from, who);
+  if (introRunning() && ['play', 'pause', 'seek', 'next', 'prev', 'playnow'].includes(d.t)) {
+    if (Date.now() - lastLockNote > 4000) { lastLockNote = Date.now(); sys('The music is paused while Pehchaan Kaun? is on. It comes back after the game.'); }
+    return;
+  }
   if (room.lock && from !== room.lock.id && LOCKED.includes(d.t)) {   // only the game winner can change things
     if (d.t !== 'seek') lockedNotice();
     return;
   }
   switch (d.t) {
-    case 'game': startGame(who); break;
+    case 'game': startGame(who, d.mode); break;
     case 'play':
       if (!room.videoId) { if (room.queue.length) advance(); }
       else if (ytReady) yt.playVideo();
@@ -403,7 +412,7 @@ function stepDown(d) {
 
 /* ---------------- following along ---------------- */
 function applyVideo() {
-  if (!ytReady || !room || role !== 'listener') return;
+  if (!ytReady || !room || role !== 'listener' || clipActive()) return;
   if (!room.videoId) { if (loadedId) { loadedId = null; yt.stopVideo(); } return; }
   if (room.videoId === loadedId) return;
   loadedId = room.videoId;
@@ -411,6 +420,7 @@ function applyVideo() {
   else yt.cueVideoById(room.videoId);
 }
 function sync() {
+  if (clipActive()) return;
   if (role !== 'listener' || !room || !room.videoId || !ytReady || !unlocked || loadedId !== room.videoId) return;
   const exp = expectedPos(), cur = yt.getCurrentTime() || 0, ps = yt.getPlayerState();
   if (ps === YT.PlayerState.ENDED) return;       // wait for the room to move to the next song
@@ -448,7 +458,11 @@ function onChat(d) {
     scheduleChatlog();
     if (!m.sys && !m.bot && Date.now() - m.at < 60000) {
       if (m.dj) djRequest(m);
-      else if (/^@game\b/i.test(m.text)) handleCtl({ id: 'g' + m.id, n: m.n, from: m.from, t: 'game' });
+      else if (/^@game\b/i.test(m.text)) {
+        const w = m.text.toLowerCase();
+        const mode = /emoji|charade/.test(w) ? 'emoji' : /song|intro|pehchaan|guess/.test(w) ? 'intro' : 'quiz';
+        handleCtl({ id: 'g' + m.id, n: m.n, from: m.from, t: 'game', mode });
+      }
     }
   }
 }
@@ -532,57 +546,169 @@ async function djRequest(m) {
   } finally { djBusy = false; }
 }
 
-/* ---------------- the quiz game ----------------
-   The timekeeper keeps the questions and answers to itself. Everyone else only ever
-   sees the current question, and sees its answer at the reveal, so nobody can peek. */
-const Q_MS = 15000, REVEAL_MS = 6000, LOCK_SONGS = 3;
-let gameQs = null, gameAnswers = new Map(), gameTimer = null, gameBusy = false;
+/* ---------------- games ----------------
+   Three games, picked from the Game tab:
+     quiz   Bollywood quiz, multiple choice           (api/game.js → lib/game-crew.js)
+     intro  Pehchaan Kaun? guess the song from a clip  (lib/party-crews.js)
+     emoji  Emoji charades                            (lib/party-crews.js)
+   The timekeeper keeps every answer to itself. Everyone else only sees the current
+   round, and its answer at the reveal, so nobody can peek. Guesses are checked here
+   in code, with spelling tolerance (Week 3 Day 4: check results by running code). */
+const GAMES = {
+  quiz:  { name: 'Bollywood quiz', bot: 'Quizmaster', loading: 'The quiz crew is writing questions…', rounds: 3, ms: 15000 },
+  intro: { name: 'Pehchaan Kaun?', bot: 'Host', loading: 'The game crew is picking songs and checking them on YouTube…', rounds: 5, ms: 20000 },
+  emoji: { name: 'Emoji charades', bot: 'Host', loading: 'The game crew is cooking up emoji clues…', rounds: 5, ms: 30000 }
+};
+const REVEAL_MS = 6000, LOCK_SONGS = 3;
+const CLIP_SECS = [6, 6, 4, 4, 2];               // clips get shorter every round
+const CLIP_LEAD = 1500;                          // time for every phone to load the clip before it starts
+let gameQs = null, gameAnswers = new Map(), gameTimer = null, hintTimer = null, gameBusy = false, resumeMusic = null;
 let myAnswer = { gid: '', idx: -1, choice: -1 };
+let myGuess = { gid: '', idx: -1, at: 0, text: '' };
+const gameInfo = g => GAMES[g && g.mode] || GAMES.quiz;
+const guessMode = g => !!(g && (g.mode === 'intro' || g.mode === 'emoji'));
 
-async function startGame(who) {
+/* Memory: this phone remembers recent answers so the crews don't repeat songs or films */
+function usedAnswers() { try { return JSON.parse(store.get('sw_used') || '[]').slice(-80); } catch (e) { return []; } }
+function rememberAnswers(list) {
+  const all = [...usedAnswers(), ...list.filter(Boolean)];
+  store.set('sw_used', JSON.stringify([...new Set(all)].slice(-80)));
+}
+
+/* Guess checking: forgiving about spelling, spaces and Hindi transliteration */
+function normAns(s) {
+  return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/&/g, ' and ').replace(/[^a-z0-9ऀ-ॿ ]+/g, ' ')
+    .replace(/\b(the|a|an|from|movie|song|film|full|video|official|audio)\b/g, ' ').replace(/\s+/g, ' ').trim();
+}
+const squash = x => x.replace(/ /g, '').replace(/aa/g, 'a').replace(/ee/g, 'i').replace(/oo/g, 'u').replace(/w/g, 'v')
+  .replace(/z/g, 'j').replace(/ph/g, 'f').replace(/sh/g, 's').replace(/(.)\1+/g, '$1').replace(/h/g, '');
+function lev(a, b) {
+  const m = a.length, n = b.length, d = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = d[0]; d[0] = i;
+    for (let j = 1; j <= n; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; }
+  }
+  return d[n];
+}
+function isMatch(guess, answers) {
+  const g = squash(normAns(guess));
+  if (g.length < 2) return false;
+  return answers.some(a => {
+    const t = squash(normAns(a));
+    if (!t) return false;
+    if (g === t) return true;
+    return t.length >= 4 && lev(g, t) <= Math.max(1, Math.floor(t.length * 0.2));
+  });
+}
+function makeHint(answer) {                      // "Zindagi Na Milegi Dobara" → "Z______ N_ M_____ D_____"
+  return String(answer).split(/\s+/).map(w => w.replace(/^([^A-Za-z0-9]*)([A-Za-z0-9])(.*)$/, (m, p, f, rest) => p + f + rest.replace(/[A-Za-z0-9]/g, '_'))).join('  ');
+}
+
+/* While Pehchaan Kaun? runs, the room's song pauses and the clips play in its place */
+function clipActive() {
+  const g = room && room.game;
+  return !!(g && g.mode === 'intro' && g.clip && (g.stage === 'q' || g.stage === 'reveal'));
+}
+function introRunning() { const g = room && room.game; return !!(g && g.mode === 'intro' && g.stage !== 'over'); }
+function pauseForGame() {
+  readPlayer();
+  resumeMusic = { playing: room.playing };
+  if (ytReady && room.videoId) yt.pauseVideo();
+  room.playing = false;
+}
+function resumeAfterGame() {
+  if (role !== 'host' || !resumeMusic) return;
+  const r = resumeMusic; resumeMusic = null;
+  if (room.videoId && ytReady) {
+    loadedId = room.videoId;
+    if (r.playing) yt.loadVideoById({ videoId: room.videoId, startSeconds: room.pos });
+    else yt.cueVideoById({ videoId: room.videoId, startSeconds: room.pos });
+  }
+  room.playing = !!(r.playing && room.videoId);
+  room.at = Date.now(); room.members = memberList();
+  pub('state', room, true);                      // skip readPlayer: the player still reports the clip for a moment
+  renderAll();
+}
+let clipKey = '';
+function clipTick() {                            // runs on every phone, timekeeper included
+  if (!clipActive() || !ytReady || !unlocked) return;
+  const c = room.game.clip, now = role === 'host' ? Date.now() : Date.now() + clockOff;
+  if (clipKey !== c.key) {
+    clipKey = c.key;
+    if (loadedId !== c.v) { loadedId = c.v; yt.cueVideoById({ videoId: c.v, startSeconds: c.start }); return; }
+  }
+  const t = (now - c.at) / 1000, ps = yt.getPlayerState();
+  const on = ps === YT.PlayerState.PLAYING || ps === YT.PlayerState.BUFFERING;
+  if (t < 0 || t > c.len) { if (on) yt.pauseVideo(); return; }
+  const want = c.start + t;
+  if (!on) { yt.seekTo(want, true); yt.playVideo(); return; }
+  if (Math.abs((yt.getCurrentTime() || 0) - want) > 0.6) yt.seekTo(want, true);
+}
+setInterval(clipTick, 200);
+
+async function startGame(who, mode) {
+  mode = GAMES[mode] ? mode : 'quiz';
+  const info = GAMES[mode];
   if (room.lock) { sys('🔒 Finish ' + room.lock.n + '\'s turn before starting a new game.'); return; }
   if (room.game || gameBusy) { sys('A game is already running.'); return; }
   gameBusy = true;
-  room.game = { gid: rid(8), stage: 'loading', idx: 0, total: 0, q: '', options: [], endsAt: 0, answerIdx: -1, fact: '', answered: [], right: [], scores: [], winner: null };
-  sys('🎲 ' + who + ' started a game. The quiz crew is writing questions…');
+  room.game = { gid: rid(8), mode, stage: 'loading', idx: 0, total: 0, q: '', options: [], emoji: '', label: '', hint: '', clip: null,
+    endsAt: 0, roundMs: info.ms, answerIdx: -1, answer: '', fact: '', answered: [], right: [], scores: [], winner: null };
+  sys('🎲 ' + who + ' started ' + info.name + '. ' + info.loading);
+  if (mode === 'intro') pauseForGame();
   pushState();
+  const fail = msg => {
+    room.game = null; gameQs = null;
+    pushState(); resumeAfterGame();               // publish first: once the song reloads, the player briefly reports 0:00
+    bot(msg, info.bot);
+  };
   try {
     const songs = [...played.map(p => p.title), room.title, ...room.queue.slice(0, 10).map(q => q.title)].filter(Boolean).slice(-25);
     const res = await fetch('/api/game', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ songs, players: memberList().map(x => x.n) })
+      body: JSON.stringify({ mode, songs, players: memberList().map(x => x.n), avoid: usedAnswers() })
     });
-    const out = await res.json().catch(() => ({ ok: false, message: 'The quiz crew sent back something I couldn\'t read.' }));
+    const out = await res.json().catch(() => ({ ok: false, message: 'The game crew sent back something I couldn\'t read.' }));
     if (role !== 'host' || !room.game) return;
-    const qs = (Array.isArray(out.questions) ? out.questions : []).filter(q => q && Array.isArray(q.options) && q.options.length === 4 && q.answer_index >= 0 && q.answer_index < 4);
-    if (!out.ok || qs.length < 3) {
-      room.game = null; pushState();
-      bot(out.message || 'I couldn\'t put a quiz together right now. Try again in a minute.', 'Quizmaster');
-      return;
+    let rounds = [];
+    if (mode === 'quiz') {
+      rounds = (Array.isArray(out.questions) ? out.questions : []).filter(q => q && Array.isArray(q.options) && q.options.length === 4 && q.answer_index >= 0 && q.answer_index < 4);
+    } else {
+      rounds = (Array.isArray(out.rounds) ? out.rounds : []).filter(r => r && clean(r.answer, 80) && Array.isArray(r.answers) &&
+        (mode === 'intro' ? okV(r.v) : clean(r.emojis, 60)));
     }
-    gameQs = qs.slice(0, 3);
+    if (!out.ok || rounds.length < 3) { fail(out.message || 'I couldn\'t put a game together right now. Try again in a minute.'); return; }
+    gameQs = rounds.slice(0, info.rounds);
+    if (mode !== 'quiz') rememberAnswers(gameQs.map(r => r.answer));
     room.game.total = gameQs.length;
     room.game.scores = memberList().map(x => ({ id: x.id, n: x.n, pts: 0 }));
-    bot(out.intro || 'Quiz time! Fastest right answers score the most.', 'Quizmaster');
+    bot(out.intro || 'Game on! Fastest right answers score the most.', info.bot);
     gameTimer = setTimeout(() => askQuestion(0), 2500);
   } catch (e) {
-    room.game = null; pushState();
-    bot('I couldn\'t reach the quiz crew. Try again in a bit.', 'Quizmaster');
+    fail('I couldn\'t reach the game crew. Try again in a bit.');
   } finally { gameBusy = false; }
 }
 function askQuestion(i) {
   const g = room.game;
   if (role !== 'host' || !g || !gameQs) return;
-  const q = gameQs[i];
+  const q = gameQs[i], ms = gameInfo(g).ms, lead = g.mode === 'intro' ? CLIP_LEAD : 0;
   gameAnswers = new Map();
-  Object.assign(g, { stage: 'q', idx: i, q: q.question, options: q.options, endsAt: Date.now() + Q_MS, answerIdx: -1, fact: '', answered: [], right: [] });
+  Object.assign(g, { stage: 'q', idx: i, endsAt: Date.now() + lead + ms, roundMs: ms, answerIdx: -1, answer: '', fact: '', answered: [], right: [], hint: '', q: '', options: [], emoji: '', label: '', clip: null });
+  if (g.mode === 'quiz') Object.assign(g, { q: q.question, options: q.options });
+  if (g.mode === 'emoji') Object.assign(g, { emoji: clean(q.emojis, 60), label: q.label === 'Song' ? 'Song' : 'Movie' });
+  if (g.mode === 'intro') {
+    g.label = 'Song';
+    g.clip = { key: rid(6), v: q.v, start: 35 + Math.floor(Math.random() * 40), len: CLIP_SECS[i] || 3, at: Date.now() + CLIP_LEAD };
+  }
   pushState();
-  clearTimeout(gameTimer);
-  gameTimer = setTimeout(() => revealQuestion(i), Q_MS);
+  clearTimeout(gameTimer); clearTimeout(hintTimer);
+  gameTimer = setTimeout(() => revealQuestion(i), lead + ms);
+  if (g.mode === 'emoji') hintTimer = setTimeout(() => { if (room.game === g && g.idx === i && g.stage === 'q') { g.hint = makeHint(q.answer); pushState(); } }, ms / 2);
 }
-function onAnswer(d, from, who) {
+function onAnswer(d, from, who) {                // quiz: one multiple choice answer per person
   const g = room.game;
-  if (role !== 'host' || !g || g.stage !== 'q' || d.gid !== g.gid || +d.idx !== g.idx || !from || gameAnswers.has(from)) return;
+  if (role !== 'host' || !g || guessMode(g) || g.stage !== 'q' || d.gid !== g.gid || +d.idx !== g.idx || !from || gameAnswers.has(from)) return;
   const choice = +d.choice;
   if (!(choice >= 0 && choice < 4)) return;
   if (!memberList().some(x => x.id === from)) return;   // only people in the room can play
@@ -594,20 +720,44 @@ function onAnswer(d, from, who) {
     gameTimer = setTimeout(() => revealQuestion(g.idx), 700);
   }
 }
+function onGuess(d, from, who) {                 // Pehchaan Kaun? and emoji charades: type as many guesses as you like
+  const g = room.game;
+  if (role !== 'host' || !guessMode(g) || g.stage !== 'q' || d.gid !== g.gid || +d.idx !== g.idx || !from || gameAnswers.has(from)) return;
+  if (!memberList().some(x => x.id === from)) return;
+  if (!isMatch(clean(d.text, 80), gameQs[g.idx].answers || [])) return;
+  gameAnswers.set(from, { ok: true, at: Date.now(), n: who });
+  g.answered = [...gameAnswers.keys()];
+  g.right = [...gameAnswers.values()].map(a => a.n);
+  pushState();
+  if (gameAnswers.size >= memberList().length) {
+    clearTimeout(gameTimer);
+    gameTimer = setTimeout(() => revealQuestion(g.idx), 700);
+  }
+}
 function revealQuestion(i) {
   const g = room.game;
   if (role !== 'host' || !g || g.idx !== i || g.stage !== 'q') return;
+  clearTimeout(hintTimer);
   const q = gameQs[i], right = [];
-  gameAnswers.forEach((a, id) => {
-    if (a.choice !== q.answer_index) return;
-    const pts = 100 + Math.round(50 * Math.max(0, g.endsAt - a.at) / Q_MS);   // faster answers score more
+  const start = g.endsAt - g.roundMs;
+  let first = true;
+  [...gameAnswers.entries()].sort((a, b) => a[1].at - b[1].at).forEach(([id, a]) => {
+    if (g.mode === 'quiz' ? a.choice !== q.answer_index : !a.ok) return;
+    let pts = 100 + Math.round(50 * Math.max(0, Math.min(1, (g.endsAt - a.at) / (g.endsAt - start))));   // faster answers score more
+    if (g.mode !== 'quiz' && first) pts += 25;   // first to get it gets a bonus
+    first = false;
     let s = g.scores.find(x => x.id === id);
     if (!s) { s = { id, n: a.n, pts: 0 }; g.scores.push(s); }
     s.pts += pts;
     right.push(a.n);
   });
   g.scores.sort((a, b) => b.pts - a.pts);
-  Object.assign(g, { stage: 'reveal', answerIdx: q.answer_index, fact: q.fact || '', right });
+  if (g.mode === 'quiz') Object.assign(g, { stage: 'reveal', answerIdx: q.answer_index, fact: q.fact || '', right });
+  else Object.assign(g, { stage: 'reveal', answer: q.answer + (q.detail ? ' (' + q.detail + ')' : ''), fact: q.fact || '', right, hint: '' });
+  if (g.mode === 'intro' && g.clip) {            // keep the song going for a few seconds while the answer shows
+    const c = g.clip;
+    g.clip = { key: rid(6), v: c.v, start: c.start + c.len, len: REVEAL_MS / 1000, at: Date.now() + 300 };
+  }
   pushState();
   clearTimeout(gameTimer);
   gameTimer = setTimeout(() => (i + 1 < gameQs.length ? askQuestion(i + 1) : finishGame()), REVEAL_MS);
@@ -616,16 +766,17 @@ function finishGame() {
   const g = room.game;
   if (role !== 'host' || !g) return;
   const top = g.scores[0];
-  g.stage = 'over';
+  g.stage = 'over'; g.clip = null;
   if (top && top.pts > 0) {
     g.winner = { id: top.id, n: top.n };
     room.lock = { id: top.id, n: top.n, played: 0, max: LOCK_SONGS };
-    sys('🏆 ' + top.n + ' wins with ' + top.pts + ' points! ' + top.n + ' controls the next ' + LOCK_SONGS + ' songs. Add your picks or ask the DJ, ' + top.n + '.');
+    sys('🏆 ' + top.n + ' wins ' + gameInfo(g).name + ' with ' + top.pts + ' points! ' + top.n + ' controls the next ' + LOCK_SONGS + ' songs. Add your picks or ask the DJ, ' + top.n + '.');
   } else {
     sys('Nobody scored this time, so nobody gets the lock.');
   }
   gameQs = null; gameAnswers = new Map();
   pushState();
+  if (g.mode === 'intro') resumeAfterGame();
   clearTimeout(gameTimer);
   gameTimer = setTimeout(() => { if (room.game && room.game.stage === 'over') { room.game = null; pushState(); } }, 15000);
 }
@@ -644,24 +795,38 @@ function renderLock() {
     ? '🔒 You won! You control the music: ' + progress + '. Add songs or use @dj, and they play first.'
     : '🔒 ' + l.n + ' won the game and controls the music: ' + progress + '.';
 }
+function renderMask() {
+  const on = clipActive(), g = room && room.game;
+  $('vidMask').hidden = !on;
+  if (!on) return;
+  $('vidMask').classList.toggle('reveal', g.stage === 'reveal');
+  $('maskTxt').textContent = g.stage === 'reveal' ? 'It was ' + g.answer : 'Which song is this? Listen closely';
+}
 function renderGame() {
   const g = room && room.game;
   if (g && g.gid && g.gid !== lastGameGid) { lastGameGid = g.gid; if (inRoom) setTab('game'); }
-  renderBadges();
+  renderBadges(); renderMask(); renderTap();
   $('gameLive').classList.toggle('won', !!(g && g.stage === 'over' && g.winner && g.winner.id === me));
   $('gameIdle').hidden = !!g;
   $('gameLive').hidden = !g;
-  $('gameBtn').disabled = !!(room && room.lock);
-  $('gameMeta').textContent = g && g.total && g.stage !== 'over' && g.stage !== 'loading' ? 'Question ' + (g.idx + 1) + ' of ' + g.total : '';
+  document.querySelectorAll('#gamePick button').forEach(b => { b.disabled = !!(room && room.lock); });
+  const info = gameInfo(g);
+  $('gameMeta').textContent = g ? info.name + (g.total && g.stage !== 'over' && g.stage !== 'loading' ? '  ·  Round ' + (g.idx + 1) + ' of ' + g.total : '') : '';
   if (!g) return;
   const opts = $('gOpts'), scores = $('gScores');
   opts.textContent = ''; scores.textContent = '';
   $('gTimer').hidden = g.stage !== 'q';
-  if (g.stage === 'loading') { $('gQ').textContent = 'The quiz crew is writing questions…'; $('gNote').textContent = 'This takes a few seconds.'; return; }
+  const gm = guessMode(g), live = g.stage === 'q' || g.stage === 'reveal';
+  $('gGuessForm').hidden = !(gm && g.stage === 'q');
+  $('gEmoji').hidden = !(g.mode === 'emoji' && live && g.emoji);
+  $('gEmoji').textContent = g.emoji || '';
+  $('gHint').hidden = !(g.stage === 'q' && g.hint);
+  $('gHint').textContent = g.hint ? 'Hint: ' + g.hint : '';
+  if (g.stage === 'loading') { $('gQ').textContent = info.loading; $('gNote').textContent = 'This takes a few seconds.'; return; }
   if (g.stage === 'over') {
     $('gQ').textContent = g.winner ? '🏆 ' + g.winner.n + ' wins!' : 'Game over';
     $('gNote').textContent = g.winner ? g.winner.n + ' controls the next ' + LOCK_SONGS + ' songs.' : 'Nobody scored this time.';
-  } else {
+  } else if (!gm) {
     $('gQ').textContent = g.q;
     const mine = myAnswer.gid === g.gid && myAnswer.idx === g.idx ? myAnswer.choice : -1;
     g.options.forEach((o, i) => {
@@ -676,6 +841,21 @@ function renderGame() {
     $('gNote').textContent = g.stage === 'q'
       ? (mine >= 0 ? 'Locked in. ' : '') + g.answered.length + ' of ' + total + ' answered'
       : (g.right.length ? 'Got it: ' + g.right.join(', ') + '.' : 'Nobody got it.') + (g.fact ? ' ' + g.fact : '');
+  } else {
+    const solved = g.answered.includes(me);
+    if (g.stage === 'q') {
+      const c = g.clip;
+      $('gQ').textContent = g.mode === 'intro' ? 'Which song is this?' + (c ? '  (' + c.len + ' second clip)' : '') : 'Guess the ' + (g.label || 'movie').toLowerCase();
+      $('gGuess').disabled = solved;
+      $('gGuess').placeholder = solved ? 'You got it' : g.mode === 'intro' ? 'Type the song name' : 'Type the ' + (g.label || 'movie').toLowerCase() + ' name';
+      const mineNow = myGuess.gid === g.gid && myGuess.idx === g.idx;
+      const wrong = !solved && mineNow && Date.now() - myGuess.at > 1200 && Date.now() - myGuess.at < 6000;
+      $('gNote').textContent = (solved ? '✓ You got it. ' : wrong ? 'Not "' + myGuess.text + '". Try again. ' : '') +
+        (g.right.length ? 'Got it: ' + g.right.join(', ') : 'Nobody yet');
+    } else {
+      $('gQ').textContent = 'It was ' + g.answer;
+      $('gNote').textContent = (g.right.length ? 'Got it: ' + g.right.join(', ') + '.' : 'Nobody got it.') + (g.fact ? ' ' + g.fact + '.' : '');
+    }
   }
   g.scores.filter(x => x.pts > 0).slice(0, 5).forEach(x => {
     const li = document.createElement('li');
@@ -687,7 +867,7 @@ function renderGameTimer() {
   const g = room && room.game;
   if (!g || g.stage !== 'q') return;
   const now = role === 'host' ? Date.now() : Date.now() + clockOff;
-  $('gBar').style.width = Math.max(0, Math.min(100, (g.endsAt - now) / Q_MS * 100)) + '%';
+  $('gBar').style.width = Math.max(0, Math.min(100, (g.endsAt - now) / (g.roundMs || 15000) * 100)) + '%';
 }
 
 /* ---------------- YouTube players ---------------- */
@@ -701,11 +881,15 @@ function initPlayers() {
       onReady: () => { ytReady = true; if (room) applyVideo(); },
       onStateChange: e => {
         if (e.data === YT.PlayerState.PLAYING && !unlocked) { unlocked = true; renderTap(); sync(); }
-        if (role !== 'host') return;
+        if (role !== 'host' || clipActive()) return;
         if (e.data === YT.PlayerState.ENDED) advance();
         else pushState();
       },
-      onError: () => { if (role === 'host' && room.videoId) { sys('That video can\'t be played here. Skipping.'); advance(); } }
+      onError: () => {
+        if (role !== 'host') return;
+        if (clipActive()) { if (room.game.stage === 'q') { sys('That clip wouldn\'t play here, so this round is skipped.'); revealQuestion(room.game.idx); } return; }
+        if (room.videoId) { sys('That video can\'t be played here. Skipping.'); advance(); }
+      }
     }
   });
   probe = new YT.Player('probe', {
@@ -783,7 +967,7 @@ function renderQueue() {
   $('qEmpty').hidden = q.length > 0;
   $('qCount').textContent = q.length ? String(q.length) : '';
 }
-function renderTap() { $('tapBtn').hidden = !(room && room.videoId && !unlocked); }
+function renderTap() { $('tapBtn').hidden = !(room && (room.videoId || clipActive()) && !unlocked); }
 function renderProgress() {
   if (!inRoom || !room) return;
   const has = !!room.videoId;
@@ -1124,7 +1308,20 @@ document.addEventListener('visibilitychange', () => {
   if (role === 'listener') { ping(); sync(); }
 });
 
-$('gameBtn').onclick = () => act('game');
+$('gamePick').addEventListener('click', e => {
+  const b = e.target.closest('button[data-mode]');
+  if (b && !b.disabled) act('game', { mode: b.dataset.mode });
+});
+$('gGuessForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const g = room && room.game, text = clean($('gGuess').value, 80);
+  if (!text || !g || g.stage !== 'q') return;
+  myGuess = { gid: g.gid, idx: g.idx, at: Date.now(), text };
+  act('guess', { gid: g.gid, idx: g.idx, text });
+  $('gGuess').value = '';
+  renderGame();
+  setTimeout(renderGame, 1300); setTimeout(renderGame, 6100);
+});
 $('gOpts').addEventListener('click', e => {
   const b = e.target.closest('button[data-choice]');
   const g = room && room.game;

@@ -64,6 +64,7 @@
   <main id="main" class="room-main">
     <section class="player" aria-label="Now playing">
       <div class="vid"><div id="player"></div>
+        <div class="mask" id="vidMask" hidden><div class="eq big on" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><p id="maskTxt"></p></div>
         <button id="tapBtn" class="tap" hidden><i class="ph-fill ph-headphones" aria-hidden="true"></i><span>Tap to start listening</span></button>
       </div>
 
@@ -138,15 +139,24 @@
     <!-- Game -->
     <section class="panel" data-panel="game" role="tabpanel" aria-label="Game" hidden>
       <div id="gameIdle" class="game-idle">
-        <i class="ph-fill ph-trophy" aria-hidden="true"></i>
-        <h3>3 Bollywood questions, 2005 onwards. Fastest right answers win.</h3>
-        <p>AI agents write a quick Bollywood quiz, using the songs you've been playing when they can. The winner controls the next 3 songs, and nobody else can skip.</p>
-        <button id="gameBtn" class="btn primary">Start a game</button>
+        <h3>Pick a game. The winner controls the next 3 songs.</h3>
+        <div class="game-pick" id="gamePick">
+          <button type="button" data-mode="intro"><i class="ph-fill ph-headphones" aria-hidden="true"></i><b>Pehchaan Kaun?</b><span>Everyone hears the same short clip. Name the song first. 5 rounds, clips get shorter.</span></button>
+          <button type="button" data-mode="emoji"><i class="ph-fill ph-smiley-wink" aria-hidden="true"></i><b>Emoji charades</b><span>Bollywood movies and songs from 2010 onwards, as emojis. 5 rounds, with a hint halfway.</span></button>
+          <button type="button" data-mode="quiz"><i class="ph-fill ph-trophy" aria-hidden="true"></i><b>Bollywood quiz</b><span>3 multiple choice questions about Bollywood from 2005 onwards.</span></button>
+        </div>
       </div>
       <div id="gameLive" class="game-live" hidden>
         <div class="game-top"><span class="game-meta" id="gameMeta"></span></div>
+        <div class="g-emoji" id="gEmoji" hidden></div>
         <h3 class="g-q" id="gQ"></h3>
         <div class="g-timer" id="gTimer"><span id="gBar"></span></div>
+        <p class="g-hint" id="gHint" hidden></p>
+        <form class="add-row" id="gGuessForm" hidden>
+          <label class="sr" for="gGuess">Your guess</label>
+          <input id="gGuess" maxlength="80" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type your guess">
+          <button type="submit" class="btn primary">Guess</button>
+        </form>
         <div class="g-opts" id="gOpts"></div>
         <p class="hint" id="gNote"></p>
         <ol class="g-scores" id="gScores"></ol>

@@ -358,6 +358,30 @@ body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbin
 .game-live.won .g-q { color: var(--accent); animation: win 600ms var(--ease-out); }
 @keyframes win { from { transform: scale(0.96); opacity: 0.4; } to { transform: scale(1); opacity: 1; } }
 
+/* game picker and guessing games */
+.game-pick { display: grid; gap: 10px; width: 100%; }
+@media (min-width: 640px) { .game-pick { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.game-pick button {
+  display: grid; gap: 6px; align-content: start; justify-items: start; text-align: left;
+  padding: 16px; border-radius: var(--r-inner); border: 1px solid var(--line-strong); background: var(--bg);
+  color: var(--ink); cursor: pointer; transition: transform 160ms var(--ease-out), border-color 200ms ease, background-color 200ms ease;
+}
+.game-pick button i { font-size: 26px; color: var(--accent); }
+.game-pick button b { font-size: 16px; font-weight: 600; }
+.game-pick button span { font-size: 13px; line-height: 1.4; color: var(--muted); }
+.game-pick button:active:not(:disabled) { transform: scale(0.97); }
+.game-pick button:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (hover: hover) and (pointer: fine) { .game-pick button:hover:not(:disabled) { border-color: var(--accent); background: var(--raised); } }
+.g-emoji { font-size: clamp(40px, 11vw, 64px); line-height: 1.15; letter-spacing: 0.06em; text-align: center; padding: 8px 0; overflow-wrap: anywhere; }
+.g-hint { font: 500 16px var(--mono); letter-spacing: 0.08em; color: var(--accent); overflow-wrap: anywhere; }
+.mask {
+  position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; justify-items: center; gap: 14px;
+  background: radial-gradient(80% 80% at 50% 40%, #2a1a12, var(--bg)); color: var(--ink); text-align: center; padding: 16px;
+}
+.mask p { font-size: clamp(16px, 2.4vw, 22px); font-weight: 600; max-width: 32ch; }
+.mask.reveal p { color: var(--accent); }
+.tap { z-index: 3; }
+
 /* new items slide in (only items that are new, not every re-render) */
 @starting-style {
   .msg.enter, .queue li.enter, .chip.enter { opacity: 0; transform: translateY(6px); }
